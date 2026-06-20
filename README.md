@@ -64,6 +64,8 @@ Controls:
 - `h` hide/show UI chrome
 - `↑/↓` change vertical gain
 - `←/→` change zoom / time span
+- `t` cycle theme
+- `b` cycle background color: `terminal`, `black`, `classic`, `neon`, `ocean`, `mono`, `indigo` (default: `terminal`)
 
 ## CLI flags
 
@@ -83,14 +85,14 @@ Controls:
 -c, --channels     input channels (1-2) [default: 1]
 -d, --device       input device name from system (default: auto)
 --safe            prefer safe non-monitor inputs (opt-out)
+-s, --sleep-ms     render refresh interval in ms [default: 16]
 -l, --list-devices print available input devices and capture hints
 -n, --history      sample history depth [default: 256]
 -w, --width        points in x-axis [default: 512]
--s, --sleep-ms     render refresh interval in ms [default: 16]
+-t, --theme        visualization theme: original | classic | neon | ocean | mono [default: original]
 ```
 
 ## Auto source behavior
-
 `audio-scope --device auto` now prefers system audio / monitor sources by default.
 
 - If a monitor/sink source exists, it will use that.

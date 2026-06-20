@@ -11,7 +11,7 @@ use ratatui::{
     style::{Color, Style},
     symbols::Marker,
     text::{Line, Span},
-    widgets::{Axis, Block, Borders, Chart, Dataset, GraphType, Paragraph},
+    widgets::{Axis, Block, Chart, Dataset, GraphType, Paragraph},
     Frame, Terminal,
 };
 
@@ -39,40 +39,27 @@ pub fn draw_frame(
     terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
     series: &[Series],
     cfg: &crate::AppConfig,
-    mode_name: &str,
+    _mode_name: &str,
     header: &str,
-    fps: usize,
+    _fps: usize,
     y_min: f64,
     y_max: f64,
+    background: Color,
 ) -> io::Result<()> {
-    let colors = [
-        Color::Cyan,
-        Color::Magenta,
-        Color::Green,
-        Color::Yellow,
-        Color::Blue,
-        Color::Red,
-    ];
-
     terminal.draw(|frame| {
         if cfg.show_ui {
             let layout = Layout::default()
                 .direction(Direction::Vertical)
-                .constraints([Constraint::Length(2), Constraint::Min(0)].as_ref())
+                .constraints([Constraint::Length(1), Constraint::Min(0)].as_ref())
                 .split(frame.area());
-            let head_text = format!(
-                "{}/{} | gain {:.2}x | zoom {:.2}x | {}fps | [q]uit [space]pause [h]ide ui [↑/↓] gain [←/→] zoom",
-                mode_name, header, cfg.scale, cfg.zoom, fps
-            );
-            let header = Paragraph::new(Line::from(head_text)).block(
-                Block::default()
-                    .borders(Borders::TOP | Borders::BOTTOM)
-                    .title("scope-studio"),
-            );
+
+            let head_style = Style::default().fg(Color::White).bg(background);
+            let head_text = header;
+            let header = Paragraph::new(Line::from(head_text)).style(head_style);
             frame.render_widget(header, layout[0]);
-            render_chart(frame, layout[1], series, cfg, &colors, y_min, y_max);
+            render_chart(frame, layout[1], series, cfg, y_min, y_max, background);
         } else {
-            render_chart(frame, frame.area(), series, cfg, &colors, y_min, y_max);
+            render_chart(frame, frame.area(), series, cfg, y_min, y_max, background);
         }
     })?;
 
@@ -84,9 +71,9 @@ fn render_chart(
     area: Rect,
     series: &[Series],
     cfg: &crate::AppConfig,
-    colors: &[Color],
     y_min: f64,
     y_max: f64,
+    background: Color,
 ) {
     let target_cols = area.width.max(2) as usize;
     let visible_len = ((target_cols as f64) * cfg.zoom)
@@ -107,7 +94,7 @@ fn render_chart(
                 .name(s.name.clone())
                 .marker(Marker::Braille)
                 .graph_type(GraphType::Line)
-                .style(Style::default().fg(*colors.get(idx).unwrap_or(&s.color)))
+                .style(Style::default().fg(s.color))
                 .data(points)
         })
         .collect();
@@ -117,16 +104,15 @@ fn render_chart(
     } else {
         y_min + 1.0
     };
-    let label_values = ["0", "1/2", "end"]
-        .iter()
-        .map(|s| Span::from(*s))
-        .collect::<Vec<_>>();
 
+    let block = Block::default().style(Style::default().bg(background));
     let chart = Chart::new(datasets)
+        .block(block)
+        .style(Style::default().bg(background))
         .x_axis(
             Axis::default()
                 .bounds([0.0, (target_cols.saturating_sub(1)) as f64])
-                .labels(label_values)
+                .labels(Vec::<Span>::new())
                 .style(Style::default().fg(Color::DarkGray)),
         )
         .y_axis(
