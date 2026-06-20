@@ -255,6 +255,41 @@ fn draw_grid_line(
     }
 }
 
+/// Terminal character cells are roughly twice as tall as they are wide.
+/// Multiply the y-displacement by this factor to get a visually round circle,
+/// otherwise a parametric circle will render as a vertically-stretched ellipse.
+const TERMINAL_CELL_ASPECT: f64 = 0.5;
+
+/// Number of parametric steps used to trace a full revolution. Chosen so
+/// consecutive points are ~1 cell apart even for large radii, keeping the
+/// outline smooth without overshooting the rasterizer.
+const CIRCLE_STEPS: usize = 256;
+
+/// Render a geometrically perfect circle at (cx, cy) with radius `radius`,
+/// using parametric equations:
+///   x(θ) = cx + radius * cos(θ)
+///   y(θ) = cy + radius * sin(θ) * TERMINAL_CELL_ASPECT
+fn draw_circle_cells(
+    cells: &mut [Vec<Option<Cell>>],
+    cx: f64,
+    cy: f64,
+    radius: f64,
+    color: Color,
+    ch: char,
+) {
+    let mut prev: Option<(f64, f64)> = None;
+    for i in 0..=CIRCLE_STEPS {
+        let theta = (i as f64 / CIRCLE_STEPS as f64) * std::f64::consts::TAU;
+        let x = cx + radius * theta.cos();
+        let y = cy + radius * theta.sin() * TERMINAL_CELL_ASPECT;
+        render_grid_point(cells, x, y, color, ch);
+        if let Some((px, py)) = prev {
+            draw_grid_line(cells, px, py, x, y, color, ch);
+        }
+        prev = Some((x, y));
+    }
+}
+
 fn render_sonar_bloom(frame: &mut Frame, area: Rect, series: &[Series], background: Color) {
     let width = area.width as usize;
     let height = area.height as usize;
@@ -265,67 +300,23 @@ fn render_sonar_bloom(frame: &mut Frame, area: Rect, series: &[Series], backgrou
     let mut cells = vec![vec![None; width]; height];
     let cx = (width as f64 - 1.0) / 2.0;
     let cy = (height as f64 - 1.0) / 2.0;
-    let max_radius = cx.min(cy) * 0.92;
 
-    let bands = [
-        (0usize, '◌', 0.18_f64, 1.0_f64),
-        (1usize, '◉', 0.34_f64, 1.35_f64),
-        (2usize, '●', 0.50_f64, 1.70_f64),
-    ];
+    // With y scaled by TERMINAL_CELL_ASPECT (=0.5) we must pick the max radius
+    // from the tighter of (horizontal / aspect) and (vertical). Otherwise the
+    // circle bleeds off whichever axis is narrower.
+    let max_radius = (cx / 1.0).min(cy / TERMINAL_CELL_ASPECT) * 0.90;
 
-    let wraps = 2.8_f64;
-    for (band_idx, glyph, base_ratio, sweep) in bands {
-        let Some(series) = series.get(band_idx) else {
-            continue;
-        };
+    // Three per-band circles: bass (inner), mid, treble (outer).
+    // Audio modulation is intentionally *not* applied here yet — this is the
+    // clean geometric baseline. Amplitude layering comes next.
+    let band_specs: [(usize, char, f64); 3] = [(0, '◌', 0.35), (1, '◉', 0.60), (2, '●', 0.85)];
 
-        let n = series.samples.len();
-        if n < 6 {
-            continue;
-        }
-
-        let mut prev: Option<(f64, f64)> = None;
-        for sample_idx in 0..n {
-            let t = sample_idx as f64 / (n as f64 - 1.0);
-            let wave = normalized(&series.samples, sample_at(series, sample_idx));
-            let radial_envelope = 0.42
-                + 0.28 * wave.abs()
-                + 0.06 * (t * 12.0 * std::f64::consts::TAU * sweep).sin().abs();
-            let angle = t * std::f64::consts::TAU * wraps + (band_idx as f64 * 0.95);
-            let radius = max_radius * (base_ratio + 0.35 * radial_envelope);
-
-            let x = cx + radius * angle.cos();
-            let y = cy + radius * angle.sin();
-            render_grid_point(&mut cells, x, y, series.color, glyph);
-
-            if let Some((px, py)) = prev {
-                draw_grid_line(
-                    &mut cells,
-                    px,
-                    py,
-                    x,
-                    y,
-                    series.color,
-                    if sample_idx % 4 == 0 { '·' } else { glyph },
-                );
-            }
-            prev = Some((x, y));
-
-            if sample_idx % 12 == 0 {
-                let inner_radius = max_radius * (base_ratio + 0.12);
-                let ix = cx + inner_radius * angle.cos();
-                let iy = cy + inner_radius * angle.sin();
-                draw_grid_line(
-                    &mut cells,
-                    cx,
-                    cy,
-                    ix,
-                    iy,
-                    series.color,
-                    if band_idx == 1 { ':' } else { '.' },
-                );
-            }
-        }
+    for (band_idx, glyph, radius_factor) in band_specs {
+        let color = series
+            .get(band_idx)
+            .map(|s| s.color)
+            .unwrap_or(Color::White);
+        draw_circle_cells(&mut cells, cx, cy, max_radius * radius_factor, color, glyph);
     }
 
     render_text_grid(frame, area, cells, background);
