@@ -16,6 +16,7 @@ Checkpoint for audio visualizer work in `scope-studio`.
   - `wave` (legacy line chart)
   - `sonar` (vectorscope-style radial motion)
   - `kale` (radial kaleidoscope vectors)
+- Refined `sonar`/`kale` to render waveform samples directly in circular/radial trajectories.
 - Render path now passes explicit background and visual style to the renderer.
 - Kept analyzer behavior in-band: 3-band (`bass`, `mid`, `treble`) reconstruction + peak/rms/clip metrics.
 - Removed fixed x-axis footer labels (`0`, `1/2`, `end`).
