@@ -6,7 +6,7 @@ use ratatui::style::Color;
 use rustfft::{num_complex::Complex, FftPlanner};
 #[cfg(feature = "audio")]
 use scope_studio::{
-    data::audio::AudioSource, render::Series, run_app, AppConfig, Matrix, Renderer,
+    data::audio::AudioSource, render::Series, run_app, AppConfig, Matrix, Renderer, VisualStyle,
 };
 
 #[cfg(feature = "audio")]
@@ -108,6 +108,7 @@ struct AudioRenderer {
     sample_rate: u32,
     theme: Theme,
     background_idx: usize,
+    visual_style: VisualStyle,
     peak: f64,
     rms: f64,
     clip_pct: f64,
@@ -123,12 +124,21 @@ impl AudioRenderer {
             sample_rate,
             theme,
             background_idx: theme_background_idx(theme),
+            visual_style: VisualStyle::Line,
             peak: 0.0,
             rms: 0.0,
             clip_pct: 0.0,
             bass: 0.0,
             mid: 0.0,
             treble: 0.0,
+        }
+    }
+
+    fn visual_style_name(&self) -> &'static str {
+        match self.visual_style {
+            VisualStyle::Line => "wave",
+            VisualStyle::Sonar => "sonar",
+            VisualStyle::Kaleidoscope => "kale",
         }
     }
 
@@ -255,9 +265,10 @@ impl Renderer for AudioRenderer {
 
     fn header(&self) -> String {
         format!(
-            "theme {:<7} | bg {:<8} |  bass {:.2}  mid {:.2}  treble {:.2}  |  peak {:.2}  rms {:.2}  clip {:>3.0}%",
+            "theme {:<7} | bg {:<8} | style {:<6} |  bass {:.2}  mid {:.2}  treble {:.2}  |  peak {:.2}  rms {:.2}  clip {:>3.0}%",
             self.theme.title(),
             self.background_name(),
+            self.visual_style_name(),
             self.bass,
             self.mid,
             self.treble,
@@ -269,6 +280,10 @@ impl Renderer for AudioRenderer {
 
     fn y_bounds(&self, _cfg: &AppConfig) -> (f64, f64) {
         (-1.0, 1.0)
+    }
+
+    fn visual_style(&self) -> VisualStyle {
+        self.visual_style
     }
 
     fn background_color(&self) -> Color {
@@ -319,6 +334,13 @@ impl Renderer for AudioRenderer {
                     }
                     crossterm::event::KeyCode::Char('b') => {
                         self.background_idx = (self.background_idx + 1) % BACKGROUND_PRESETS.len();
+                    }
+                    crossterm::event::KeyCode::Char('v') => {
+                        self.visual_style = match self.visual_style {
+                            VisualStyle::Line => VisualStyle::Sonar,
+                            VisualStyle::Sonar => VisualStyle::Kaleidoscope,
+                            VisualStyle::Kaleidoscope => VisualStyle::Line,
+                        };
                     }
                     _ => {}
                 }
