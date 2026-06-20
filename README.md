@@ -66,7 +66,7 @@ Controls:
 - `←/→` change zoom / time span
 - `t` cycle theme
 - `b` cycle background color: `terminal`, `black`, `classic`, `neon`, `ocean`, `mono`, `indigo` (default: `terminal`)
-- `v` cycle visual style: `wave`, `sonar`, `kale`
+- `v` cycle visual style: `wave`, `sonar` (vectorscope), `kale` (radial kaleidoscope)
 
 ## CLI flags
 
