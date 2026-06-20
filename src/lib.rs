@@ -58,12 +58,22 @@ impl RingBuffer {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum VisualStyle {
+    Line,
+    Sonar,
+    Kaleidoscope,
+}
+
 pub trait Renderer {
     fn mode_name(&self) -> &'static str;
     fn header(&self) -> String;
     fn y_bounds(&self, _cfg: &AppConfig) -> (f64, f64);
     fn process(&mut self, cfg: &AppConfig, frame: &SourceFrame) -> Vec<render::Series>;
     fn handle_event(&mut self, _event: &crossterm::event::Event, _cfg: &mut AppConfig) {}
+    fn visual_style(&self) -> VisualStyle {
+        VisualStyle::Line
+    }
     fn background_color(&self) -> Color {
         Color::Black
     }
@@ -94,6 +104,7 @@ pub fn run_app<S: DataSource, R: Renderer>(
                     y_min,
                     y_max,
                     renderer.background_color(),
+                    renderer.visual_style(),
                 )?;
             }
 
