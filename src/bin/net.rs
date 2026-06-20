@@ -55,8 +55,8 @@ impl Renderer for NetRenderer {
         "net"
     }
 
-    fn header(&self) -> &'static str {
-        "RSSI / Throughput"
+    fn header(&self) -> String {
+        "RSSI / Throughput".to_string()
     }
 
     fn y_bounds(&self, _cfg: &AppConfig) -> (f64, f64) {
