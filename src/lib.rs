@@ -61,8 +61,6 @@ impl RingBuffer {
 #[derive(Debug, Clone, Copy)]
 pub enum VisualStyle {
     Line,
-    Sonar,
-    Kaleidoscope,
 }
 
 pub trait Renderer {

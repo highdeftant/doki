@@ -108,7 +108,6 @@ struct AudioRenderer {
     sample_rate: u32,
     theme: Theme,
     background_idx: usize,
-    visual_style: VisualStyle,
     peak: f64,
     rms: f64,
     clip_pct: f64,
@@ -124,7 +123,6 @@ impl AudioRenderer {
             sample_rate,
             theme,
             background_idx: theme_background_idx(theme),
-            visual_style: VisualStyle::Line,
             peak: 0.0,
             rms: 0.0,
             clip_pct: 0.0,
@@ -135,11 +133,7 @@ impl AudioRenderer {
     }
 
     fn visual_style_name(&self) -> &'static str {
-        match self.visual_style {
-            VisualStyle::Line => "wave",
-            VisualStyle::Sonar => "sonar",
-            VisualStyle::Kaleidoscope => "kale",
-        }
+        "wave"
     }
 
     fn background_name(&self) -> &'static str {
@@ -283,7 +277,7 @@ impl Renderer for AudioRenderer {
     }
 
     fn visual_style(&self) -> VisualStyle {
-        self.visual_style
+        VisualStyle::Line
     }
 
     fn background_color(&self) -> Color {
@@ -334,13 +328,6 @@ impl Renderer for AudioRenderer {
                     }
                     crossterm::event::KeyCode::Char('b') => {
                         self.background_idx = (self.background_idx + 1) % BACKGROUND_PRESETS.len();
-                    }
-                    crossterm::event::KeyCode::Char('v') => {
-                        self.visual_style = match self.visual_style {
-                            VisualStyle::Line => VisualStyle::Sonar,
-                            VisualStyle::Sonar => VisualStyle::Kaleidoscope,
-                            VisualStyle::Kaleidoscope => VisualStyle::Line,
-                        };
                     }
                     _ => {}
                 }
