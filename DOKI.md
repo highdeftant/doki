@@ -14,8 +14,8 @@ Checkpoint for audio visualizer work in `scope-studio`.
   - `terminal` preset uses terminal background via `Color::Reset` and is the default for `original`.
 - Added runtime visual-style switching (`v`):
   - `wave` (legacy line chart)
-  - `sonar` (concentric radar bloom)
-  - `kale` (kaleidoscope-style mirrored radial mirroring)
+  - `sonar` (vectorscope-style radial motion)
+  - `kale` (radial kaleidoscope vectors)
 - Render path now passes explicit background and visual style to the renderer.
 - Kept analyzer behavior in-band: 3-band (`bass`, `mid`, `treble`) reconstruction + peak/rms/clip metrics.
 - Removed fixed x-axis footer labels (`0`, `1/2`, `end`).

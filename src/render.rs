@@ -211,64 +211,143 @@ fn render_text_grid(
     );
 }
 
+fn sample_at(series: &Series, idx: usize) -> f64 {
+    series.samples.get(idx).copied().unwrap_or(0.0)
+}
+
+fn max_abs(samples: &[f64]) -> f64 {
+    samples.iter().map(|s| s.abs()).fold(0.0f64, f64::max)
+}
+
+fn normalized(samples: &[f64], sample: f64) -> f64 {
+    let peak = max_abs(samples);
+    if peak <= f64::EPSILON {
+        0.0
+    } else {
+        (sample / peak).clamp(-1.0, 1.0)
+    }
+}
+
+fn rotate_point(x: f64, y: f64, angle: f64) -> (f64, f64) {
+    let (sa, ca) = angle.sin_cos();
+    (x * ca - y * sa, x * sa + y * ca)
+}
+
+fn draw_grid_line(
+    cells: &mut [Vec<Option<Cell>>],
+    x0: f64,
+    y0: f64,
+    x1: f64,
+    y1: f64,
+    color: Color,
+    ch: char,
+) {
+    let dx = x1 - x0;
+    let dy = y1 - y0;
+    let steps = (dx.abs().max(dy.abs()).ceil() as usize).max(1);
+    let inv = 1.0 / steps as f64;
+
+    for step in 0..=steps {
+        let t = step as f64 * inv;
+        let x = x0 + dx * t;
+        let y = y0 + dy * t;
+        render_grid_point(cells, x, y, color, ch);
+    }
+}
+
 fn render_sonar_bloom(frame: &mut Frame, area: Rect, series: &[Series], background: Color) {
     let width = area.width as usize;
     let height = area.height as usize;
-    if width < 3 || height < 3 {
+    if width < 4 || height < 4 || series.is_empty() {
         return;
     }
 
     let mut cells = vec![vec![None; width]; height];
     let cx = (width as f64 - 1.0) / 2.0;
     let cy = (height as f64 - 1.0) / 2.0;
-    let max_radius = cx.min(cy) * 0.9;
+    let radius = cx.min(cy) * 0.92;
 
-    let base = [0.32, 0.56, 0.76];
+    let bass = series.get(0);
+    let mid = series.get(1);
+    let treble = series.get(2);
+    let n = bass
+        .map(|s| s.samples.len())
+        .unwrap_or(0)
+        .min(mid.map(|s| s.samples.len()).unwrap_or(0))
+        .min(treble.map(|s| s.samples.len()).unwrap_or(0));
 
-    for (band_idx, s) in series.iter().take(3).enumerate() {
-        if s.samples.is_empty() {
-            continue;
-        }
+    if n < 4 {
+        return;
+    }
 
-        let mut level = 0.0;
-        for sample in &s.samples {
-            level += sample.abs();
-        }
-        level = (level / s.samples.len() as f64).clamp(0.0, 1.0);
+    let pairings: [(usize, usize, Color, char, usize); 3] = [
+        (0, 1, series[0].color, '•', 0),
+        (1, 2, series[1].color, '◉', 1),
+        (2, 0, series[2].color, '◌', 2),
+    ];
 
-        let ring_count = 1 + (level * 5.0).round() as usize;
-        let base_radius = max_radius * base[band_idx.min(2)] * 0.9;
-        let pulse_radius = max_radius * (0.10 + level * 0.45);
-        let step = (s.samples.len().max(1) as f64).max(1.0);
+    let mut prev: [Option<(f64, f64)>; 3] = [None, None, None];
+    for i in 0..n {
+        let t = i as f64 / (n as f64 - 1.0);
+        let spin = t * std::f64::consts::TAU * 2.2;
 
-        for ring in 0..=ring_count {
-            let t = if ring_count == 0 {
+        for &(a_idx, b_idx, color, ch, pair_idx) in pairings.iter() {
+            let a_series = match a_idx {
+                0 => bass,
+                1 => mid,
+                2 => treble,
+                _ => None,
+            };
+            let b_series = match b_idx {
+                0 => bass,
+                1 => mid,
+                2 => treble,
+                _ => None,
+            };
+
+            let a = if let Some(s) = a_series {
+                normalized(&s.samples, sample_at(s, i))
+            } else {
                 0.0
-            } else {
-                ring as f64 / ring_count as f64
             };
-            let radius = base_radius + t * pulse_radius;
-            let points = 72usize.saturating_add((radius * 2.0) as usize);
-            let ch = if ring == ring_count {
-                '.'
-            } else if t < 0.5 {
-                '◌'
+            let b = if let Some(s) = b_series {
+                normalized(&s.samples, sample_at(s, i))
             } else {
-                'o'
+                0.0
             };
-            for i in 0..points {
-                let angle = (i as f64 / points as f64) * std::f64::consts::TAU;
-                let idx = ((angle / std::f64::consts::TAU) * step) as usize % s.samples.len();
-                let wobble = s.samples[idx] * (max_radius * 0.08);
-                let r = (radius + wobble).max(0.0);
-                let x = cx + r * angle.cos();
-                let y = cy + r * angle.sin();
-                render_grid_point(&mut cells, x, y, s.color, ch);
 
-                if t < 0.33 {
-                    let x2 = cx + (r * 0.7) * angle.cos();
-                    let y2 = cy + (r * 0.7) * angle.sin();
-                    render_grid_point(&mut cells, x2, y2, s.color, '·');
+            let envelope = 0.18 + 0.85 * (0.5 + 0.5 * (spin.sin() * (i as f64 / 8.0).sin())).abs();
+            let raw_x = 0.80 * a + 0.30 * b.sin() as f64;
+            let raw_y = 0.80 * b + 0.30 * a.cos() as f64;
+            let (x_rot, y_rot) = rotate_point(raw_x, raw_y, spin);
+            let x = cx + x_rot * radius * envelope;
+            let y = cy + y_rot * radius * (envelope * 0.85);
+
+            if pair_idx == 0 {
+                render_grid_point(&mut cells, x, y, color, ch);
+            }
+
+            if let Some((px, py)) = prev[pair_idx] {
+                draw_grid_line(
+                    &mut cells,
+                    px,
+                    py,
+                    x,
+                    y,
+                    color,
+                    if i % 2 == 0 { '·' } else { ch },
+                );
+            }
+            prev[pair_idx] = Some((x, y));
+
+            if i % 8 == 0 {
+                for glow in 0..2 {
+                    let g = glow as f64 * 0.35;
+                    let gx =
+                        cx + (x_rot * (radius * (envelope + g) * 0.22) + (g * 2.0) * (spin.cos()));
+                    let gy =
+                        cy + (y_rot * (radius * (envelope + g) * 0.22) + (g * 2.0) * (spin.sin()));
+                    render_grid_point(&mut cells, gx, gy, color, '.');
                 }
             }
         }
@@ -280,52 +359,96 @@ fn render_sonar_bloom(frame: &mut Frame, area: Rect, series: &[Series], backgrou
 fn render_kaleidoscope(frame: &mut Frame, area: Rect, series: &[Series], background: Color) {
     let width = area.width as usize;
     let height = area.height as usize;
-    if width < 3 || height < 3 {
+    if width < 4 || height < 4 || series.len() < 3 {
         return;
     }
 
     let mut cells = vec![vec![None; width]; height];
     let cx = (width as f64 - 1.0) / 2.0;
     let cy = (height as f64 - 1.0) / 2.0;
-    let max_radius = cx.min(cy) * 0.9;
+    let radius = cx.min(cy) * 0.84;
 
-    let chars = ['*', '◉', '·'];
-    for (band_idx, s) in series.iter().take(3).enumerate() {
-        let n = s.samples.len().max(3);
-        let mut level = 0.0;
-        for sample in &s.samples {
-            level += sample.abs();
-        }
-        let level = (level / s.samples.len().max(1) as f64).clamp(0.0, 1.0);
-        let ring_base = max_radius * (0.08 + band_idx as f64 * 0.2);
-        for i in 0..n {
-            let theta = (i as f64 / n as f64) * (std::f64::consts::FRAC_PI_2);
-            let amp = s.samples.get(i).copied().unwrap_or(0.0).abs();
-            let radius = ring_base + max_radius * 0.45 * amp + max_radius * 0.10 * level;
-            let x = radius * theta.cos();
-            let y = radius * theta.sin();
+    let bass = series.get(0);
+    let mid = series.get(1);
+    let treble = series.get(2);
+    let n = bass
+        .map(|s| s.samples.len())
+        .unwrap_or(0)
+        .min(mid.map(|s| s.samples.len()).unwrap_or(0))
+        .min(treble.map(|s| s.samples.len()).unwrap_or(0));
 
-            let points = [
-                (x, y),
-                (-x, y),
-                (x, -y),
-                (-x, -y),
-                (y, x),
-                (-y, x),
-                (y, -x),
-                (-y, -x),
-            ];
+    if n < 4 {
+        return;
+    }
 
-            for (px, py) in points {
-                let gx = cx + px;
-                let gy = cy + py;
-                render_grid_point(
-                    &mut cells,
-                    gx,
-                    gy,
-                    s.color,
-                    chars[band_idx.min(chars.len() - 1)],
-                );
+    let sectors = 12usize;
+    let mut prev: Vec<[Option<(f64, f64)>; 12]> = vec![[None; 12]; 3];
+
+    for i in 0..n {
+        let t = i as f64 / (n as f64 - 1.0);
+        let bass_s = bass
+            .map(|s| normalized(&s.samples, sample_at(s, i)))
+            .unwrap_or(0.0);
+        let mid_s = mid
+            .map(|s| normalized(&s.samples, sample_at(s, i)))
+            .unwrap_or(0.0);
+        let treble_s = treble
+            .map(|s| normalized(&s.samples, sample_at(s, i)))
+            .unwrap_or(0.0);
+
+        let pairs = [
+            (bass_s, mid_s, series[0].color, '◊', 0usize),
+            (mid_s, treble_s, series[1].color, '◆', 1usize),
+            (treble_s, bass_s, series[2].color, '✺', 2usize),
+        ];
+
+        let twist = t * std::f64::consts::TAU * 1.5;
+        for (x_in, y_in, color, ch, pair_idx) in pairs {
+            let spin_x = x_in * 0.85 + 0.15 * twist.sin() * y_in;
+            let spin_y = y_in * 0.85 + 0.15 * twist.cos() * x_in;
+
+            for sector in 0..sectors {
+                let angle = (sector as f64 / sectors as f64) * std::f64::consts::TAU;
+                let mut sx = spin_x;
+                let sy = spin_y;
+
+                if sector % 2 == 1 {
+                    sx = -sx;
+                }
+
+                let (rx, ry) = rotate_point(sx, sy, angle);
+                let radius_scale =
+                    (0.62 + 0.22 * pair_idx as f64 + 0.05 * (i as f64).sin().abs()) * radius;
+                let x = cx + rx * radius_scale;
+                let y = cy + ry * radius_scale;
+
+                if i == 0 {
+                    render_grid_point(&mut cells, x, y, color, ch);
+                } else if let Some((px, py)) = prev[pair_idx][sector] {
+                    draw_grid_line(
+                        &mut cells,
+                        px,
+                        py,
+                        x,
+                        y,
+                        color,
+                        if i % 3 == 0 { '·' } else { ch },
+                    );
+                }
+                prev[pair_idx][sector] = Some((x, y));
+            }
+
+            if i % 16 == 0 {
+                let spoke_end_x = cx + spin_y.signum() * (radius * 0.35);
+                let spoke_end_y = cy + spin_x.signum() * (radius * 0.35);
+                let c = if pair_idx == 2 {
+                    '|'
+                } else if pair_idx == 1 {
+                    ':'
+                } else {
+                    '.'
+                };
+                draw_grid_line(&mut cells, cx, cy, spoke_end_x, spoke_end_y, color, c);
             }
         }
     }
