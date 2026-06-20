@@ -108,6 +108,7 @@ struct AudioRenderer {
     sample_rate: u32,
     theme: Theme,
     background_idx: usize,
+    wave_count: usize,
     peak: f64,
     rms: f64,
     clip_pct: f64,
@@ -123,6 +124,7 @@ impl AudioRenderer {
             sample_rate,
             theme,
             background_idx: theme_background_idx(theme),
+            wave_count: 3,
             peak: 0.0,
             rms: 0.0,
             clip_pct: 0.0,
@@ -138,6 +140,14 @@ impl AudioRenderer {
 
     fn background_name(&self) -> &'static str {
         BACKGROUND_PRESETS[self.background_idx % BACKGROUND_PRESETS.len()].1
+    }
+
+    fn cycle_wave_count(&mut self) {
+        self.wave_count = match self.wave_count {
+            3 => 2,
+            2 => 1,
+            _ => 3,
+        };
     }
 
     fn trim_samples(row: &[f64], cfg: &AppConfig) -> Vec<f64> {
@@ -176,10 +186,12 @@ impl AudioRenderer {
     fn band_waveforms(&self, cfg: &AppConfig, samples: &[f64]) -> (Vec<Vec<f64>>, [f64; 3]) {
         if samples.is_empty() {
             let width = cfg.width.max(1);
-            return (
-                vec![vec![0.0; width], vec![0.0; width], vec![0.0; width]],
-                [0.0; 3],
-            );
+            let count = self.wave_count.clamp(1, 3);
+            return (vec![vec![0.0; width]; count], [0.0; 3]);
+        }
+
+        if self.wave_count == 1 {
+            return (vec![samples.to_vec()], [self.rms, 0.0, 0.0]);
         }
 
         let n = samples.len().max(64).next_power_of_two().min(2048);
@@ -203,16 +215,20 @@ impl AudioRenderer {
         fft.process(&mut spectrum);
 
         let sample_rate = self.sample_rate.max(8_000) as f64;
-        let bands: [(f64, f64); 3] = [
-            (20.0, 250.0),
-            (250.0, 2_500.0),
-            (2_500.0, sample_rate / 2.0),
-        ];
+        let bands: &[(f64, f64)] = if self.wave_count == 2 {
+            &[(20.0, 800.0), (800.0, sample_rate / 2.0)]
+        } else {
+            &[
+                (20.0, 250.0),
+                (250.0, 2_500.0),
+                (2_500.0, sample_rate / 2.0),
+            ]
+        };
 
         let mut waveforms = Vec::with_capacity(3);
         let mut levels = [0.0; 3];
 
-        for (band_idx, (low, high)) in bands.into_iter().enumerate() {
+        for (band_idx, &(low, high)) in bands.iter().enumerate() {
             let mut band_spectrum = vec![Complex::new(0.0, 0.0); n];
             for bin in 0..=n / 2 {
                 let freq = (bin as f64 * sample_rate) / n as f64;
@@ -259,10 +275,11 @@ impl Renderer for AudioRenderer {
 
     fn header(&self) -> String {
         format!(
-            "theme {:<7} | bg {:<8} | style {:<6} |  bass {:.2}  mid {:.2}  treble {:.2}  |  peak {:.2}  rms {:.2}  clip {:>3.0}%",
+            "theme {:<7} | bg {:<8} | style {:<6} | waves {} |  bass {:.2}  mid {:.2}  treble {:.2}  |  peak {:.2}  rms {:.2}  clip {:>3.0}%",
             self.theme.title(),
             self.background_name(),
             self.visual_style_name(),
+            self.wave_count,
             self.bass,
             self.mid,
             self.treble,
@@ -296,9 +313,13 @@ impl Renderer for AudioRenderer {
         self.mid = levels[1];
         self.treble = levels[2];
 
-        let band_names = ["bass", "mid", "treble"];
+        let band_names: &[&str] = match self.wave_count {
+            1 => &["wave"],
+            2 => &["low", "high"],
+            _ => &["bass", "mid", "treble"],
+        };
         let band_colors = self.theme.colors();
-        let mut series = Vec::with_capacity(3);
+        let mut series = Vec::with_capacity(band_names.len());
         for ((name, color), waveform) in band_names
             .iter()
             .zip(band_colors.iter())
@@ -328,6 +349,9 @@ impl Renderer for AudioRenderer {
                     }
                     crossterm::event::KeyCode::Char('b') => {
                         self.background_idx = (self.background_idx + 1) % BACKGROUND_PRESETS.len();
+                    }
+                    crossterm::event::KeyCode::Char('w') => {
+                        self.cycle_wave_count();
                     }
                     _ => {}
                 }

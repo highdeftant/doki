@@ -62,6 +62,9 @@ Controls:
 - `q` or `Ctrl+c` exit
 - `space` pause
 - `h` hide/show UI chrome
+- `r` reset gain/zoom to the default view
+- `p` cycle view presets
+- `w` cycle wave count: `3`, `2`, `1`
 - `↑/↓` change vertical gain
 - `←/→` change zoom / time span
 - `t` cycle theme

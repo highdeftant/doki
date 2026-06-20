@@ -1,17 +1,18 @@
 use std::io;
 use std::io::stdout;
 
+use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
 use ratatui::{
     backend::CrosstermBackend,
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Style},
     symbols::Marker,
     text::{Line, Span},
-    widgets::{Axis, Block, Chart, Dataset, GraphType, Paragraph},
+    widgets::{Axis, Block, Borders, Chart, Clear, Dataset, GraphType, Paragraph, Wrap},
     Frame, Terminal,
 };
 
@@ -26,7 +27,7 @@ pub struct Series {
 
 pub fn init_terminal() -> io::Result<Terminal<CrosstermBackend<std::io::Stdout>>> {
     enable_raw_mode()?;
-    execute!(stdout(), EnterAlternateScreen)?;
+    execute!(stdout(), EnterAlternateScreen, EnableMouseCapture)?;
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
     terminal.clear()?;
     Ok(terminal)
@@ -34,7 +35,7 @@ pub fn init_terminal() -> io::Result<Terminal<CrosstermBackend<std::io::Stdout>>
 
 pub fn restore_terminal() -> io::Result<()> {
     disable_raw_mode()?;
-    execute!(stdout(), LeaveAlternateScreen)
+    execute!(stdout(), DisableMouseCapture, LeaveAlternateScreen)
 }
 
 pub fn draw_frame(
@@ -75,9 +76,57 @@ pub fn draw_frame(
                 style,
             );
         }
+        if cfg.show_help {
+            render_help_popup(frame, background);
+        }
     })?;
 
     Ok(())
+}
+
+fn render_help_popup(frame: &mut Frame, background: Color) {
+    let area = centered_rect(frame.area(), 54, 16);
+    let text = vec![
+        Line::from("keyboard controls"),
+        Line::from(""),
+        Line::from("q / Ctrl-C / Ctrl-Q  quit"),
+        Line::from("Space              pause / resume"),
+        Line::from("h                  hide / show header"),
+        Line::from("r                  reset view"),
+        Line::from("p                  cycle view preset"),
+        Line::from("w                  cycle waves: 3 / 2 / 1"),
+        Line::from("↑ / ↓              gain up / down"),
+        Line::from("← / →              zoom out / in"),
+        Line::from("t                  cycle theme"),
+        Line::from("b                  cycle background"),
+        Line::from("Esc / ?            close this window"),
+    ];
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .style(Style::default().fg(Color::White).bg(background));
+    let popup = Paragraph::new(text)
+        .block(block)
+        .alignment(Alignment::Left)
+        .style(Style::default().fg(Color::White).bg(background))
+        .wrap(Wrap { trim: true });
+
+    frame.render_widget(Clear, area);
+    frame.render_widget(popup, area);
+}
+
+fn centered_rect(parent: Rect, width: u16, height: u16) -> Rect {
+    let width = width.min(parent.width);
+    let height = height.min(parent.height);
+    let x = parent.x + parent.width.saturating_sub(width) / 2;
+    let y = parent.y + parent.height.saturating_sub(height) / 2;
+
+    Rect {
+        x,
+        y,
+        width,
+        height,
+    }
 }
 
 fn render_chart(

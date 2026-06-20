@@ -5,6 +5,8 @@ use std::time::{Duration, Instant};
 pub type Matrix = Vec<Vec<f64>>;
 pub type SourceFrame = Matrix;
 
+const VIEW_PRESETS: [(f64, f64); 3] = [(1.0, 4.0), (1.5, 2.0), (0.75, 8.0)];
+
 pub trait DataSource {
     fn next_frame(&mut self) -> io::Result<Option<SourceFrame>>;
 }
@@ -16,6 +18,8 @@ pub struct AppConfig {
     pub zoom: f64,
     pub scale: f64,
     pub show_ui: bool,
+    pub show_help: bool,
+    pub view_preset: usize,
     pub sleep_ms: u64,
 }
 
@@ -27,8 +31,27 @@ impl Default for AppConfig {
             zoom: 4.0,
             scale: 1.0,
             show_ui: true,
+            show_help: false,
+            view_preset: 0,
             sleep_ms: 16,
         }
+    }
+}
+
+impl AppConfig {
+    pub fn reset_view(&mut self) {
+        self.apply_view_preset(0);
+    }
+
+    pub fn cycle_view_preset(&mut self) {
+        self.apply_view_preset((self.view_preset + 1) % VIEW_PRESETS.len());
+    }
+
+    fn apply_view_preset(&mut self, preset: usize) {
+        self.view_preset = preset % VIEW_PRESETS.len();
+        let (scale, zoom) = VIEW_PRESETS[self.view_preset];
+        self.scale = scale;
+        self.zoom = zoom;
     }
 }
 
@@ -117,8 +140,10 @@ pub fn run_app<S: DataSource, R: Renderer>(
         if crossterm::event::poll(Duration::from_millis(cfg.sleep_ms))? {
             while crossterm::event::poll(Duration::from_millis(0))? {
                 let event = crossterm::event::read()?;
-                if let crossterm::event::Event::Key(key) = event {
-                    if key.kind == crossterm::event::KeyEventKind::Press {
+                match event {
+                    crossterm::event::Event::Key(key)
+                        if key.kind == crossterm::event::KeyEventKind::Press =>
+                    {
                         match (key.modifiers, key.code) {
                             (
                                 crossterm::event::KeyModifiers::CONTROL,
@@ -135,25 +160,37 @@ pub fn run_app<S: DataSource, R: Renderer>(
                                 render::restore_terminal()?;
                                 return Ok(());
                             }
+                            (_, crossterm::event::KeyCode::Esc)
+                            | (_, crossterm::event::KeyCode::Char('?'))
+                                if cfg.show_help =>
+                            {
+                                cfg.show_help = false;
+                            }
+                            (_, _) if cfg.show_help => {}
+                            (_, crossterm::event::KeyCode::Char('?')) => cfg.show_help = true,
+                            (_, crossterm::event::KeyCode::Char('r')) => cfg.reset_view(),
+                            (_, crossterm::event::KeyCode::Char('p')) => cfg.cycle_view_preset(),
                             (_, crossterm::event::KeyCode::Char(' ')) => cfg.pause = !cfg.pause,
                             (_, crossterm::event::KeyCode::Char('h')) => cfg.show_ui = !cfg.show_ui,
                             (_, crossterm::event::KeyCode::Up) => {
-                                cfg.scale = (cfg.scale + 0.1).min(8.0)
+                                cfg.scale = (cfg.scale + 0.1).min(8.0);
                             }
                             (_, crossterm::event::KeyCode::Down) => {
-                                cfg.scale = (cfg.scale - 0.1).max(0.05)
+                                cfg.scale = (cfg.scale - 0.1).max(0.05);
                             }
                             (_, crossterm::event::KeyCode::Right) => {
-                                cfg.zoom = (cfg.zoom + 0.25).min(16.0)
+                                cfg.zoom = (cfg.zoom + 0.25).min(16.0);
                             }
                             (_, crossterm::event::KeyCode::Left) => {
-                                cfg.zoom = (cfg.zoom - 0.25).max(0.5)
+                                cfg.zoom = (cfg.zoom - 0.25).max(0.5);
                             }
                             (_, _) => {
                                 renderer.handle_event(&event, &mut cfg);
                             }
                         }
                     }
+                    crossterm::event::Event::Mouse(_) => {}
+                    _ => {}
                 }
             }
         } else {
