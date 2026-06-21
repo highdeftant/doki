@@ -46,8 +46,15 @@ impl AudioSource {
         history: usize,
         monitor_preferred: bool,
     ) -> anyhow::Result<Self> {
-        if monitor_preferred {
+        if monitor_preferred && Self::supports_system_audio_capture() {
             Ok(Self::System(SystemCapture::new(
+                device,
+                sample_rate,
+                channels,
+                history,
+            )?))
+        } else if monitor_preferred && !Self::supports_system_audio_capture() {
+            Ok(Self::Safe(SafeCapture::new(
                 device,
                 sample_rate,
                 channels,
@@ -64,18 +71,32 @@ impl AudioSource {
     }
 
     pub fn list_input_devices(system_audio: bool) -> anyhow::Result<()> {
-        if system_audio {
+        if system_audio && Self::supports_system_audio_capture() {
             println!("System audio capture (PipeWire capture sink):");
             println!("  pw-cat --record --format f32 --channels 2 --rate 48000 -P stream.capture.sink=true -");
             println!();
         }
 
-        println!("Safe input devices (use --safe for mic/input capture):");
+        if system_audio && !Self::supports_system_audio_capture() {
+            println!("System audio capture is not supported on this platform.");
+            println!("This build will use safe input devices by default.");
+            println!();
+        }
+
+        if Self::supports_system_audio_capture() {
+            println!("Safe input devices (use --safe for mic/input capture):");
+        } else {
+            println!("Safe input devices (default capture mode on this platform):");
+        }
         let host = cpal::default_host();
         for (name, default_tag, auto_tag) in list_safe_input_devices(&host)? {
             println!("  {default_tag}{name}{auto_tag}");
         }
         Ok(())
+    }
+
+    pub fn supports_system_audio_capture() -> bool {
+        cfg!(target_os = "linux")
     }
 }
 
