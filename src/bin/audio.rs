@@ -22,6 +22,8 @@ enum Theme {
     Ocean,
     /// Soft monochrome grayscale
     Mono,
+    /// Muted seafoam and rose tones from pinboard palette
+    Doki,
 }
 
 #[cfg(feature = "audio")]
@@ -33,6 +35,11 @@ impl Theme {
             Theme::Neon => [Color::Cyan, Color::Magenta, Color::Yellow],
             Theme::Ocean => [Color::Blue, Color::Cyan, Color::Green],
             Theme::Mono => [Color::Gray, Color::DarkGray, Color::White],
+            Theme::Doki => [
+                Color::Rgb(120, 160, 168),
+                Color::Rgb(152, 120, 152),
+                Color::Rgb(136, 208, 192),
+            ],
         }
     }
 
@@ -43,12 +50,13 @@ impl Theme {
             Theme::Neon => "neon",
             Theme::Ocean => "ocean",
             Theme::Mono => "mono",
+            Theme::Doki => "doki",
         }
     }
 }
 
 #[cfg(feature = "audio")]
-const BACKGROUND_PRESETS: [(Color, &str); 7] = [
+const BACKGROUND_PRESETS: [(Color, &str); 8] = [
     (Color::Reset, "terminal"),
     (Color::Black, "black"),
     (Color::Rgb(10, 12, 14), "classic"),
@@ -56,6 +64,7 @@ const BACKGROUND_PRESETS: [(Color, &str); 7] = [
     (Color::Rgb(3, 10, 24), "ocean"),
     (Color::Rgb(16, 16, 16), "mono"),
     (Color::Rgb(0, 8, 24), "indigo"),
+    (Color::Rgb(30, 32, 34), "doki"),
 ];
 
 #[cfg(feature = "audio")]
@@ -66,6 +75,7 @@ fn theme_background_idx(theme: Theme) -> usize {
         Theme::Neon => 3,
         Theme::Ocean => 4,
         Theme::Mono => 5,
+        Theme::Doki => 7,
     }
 }
 
@@ -346,7 +356,8 @@ impl Renderer for AudioRenderer {
                             Theme::Classic => Theme::Neon,
                             Theme::Neon => Theme::Ocean,
                             Theme::Ocean => Theme::Mono,
-                            Theme::Mono => Theme::Original,
+                            Theme::Mono => Theme::Doki,
+                            Theme::Doki => Theme::Original,
                         };
                     }
                     crossterm::event::KeyCode::Char('b') => {

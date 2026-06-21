@@ -72,7 +72,7 @@ Controls:
 - `↑/↓` change vertical gain
 - `←/→` change zoom / time span
 - `t` cycle theme
-- `b` cycle background color: `terminal`, `black`, `classic`, `neon`, `ocean`, `mono`, `indigo` (default: `terminal`)
+- `b` cycle background color: `terminal`, `black`, `classic`, `neon`, `ocean`, `mono`, `indigo`, `doki` (default: `terminal`)
 - `wave` is the default and only audio visual style currently.
 
 ## CLI flags
@@ -97,7 +97,7 @@ Controls:
 -l, --list-devices print available input devices and capture hints
 -n, --history      sample history depth [default: 256]
 -w, --width        points in x-axis [default: 512]
--t, --theme        visualization theme: original | classic | neon | ocean | mono [default: original]
+-t, --theme        visualization theme: original | classic | neon | ocean | mono | doki [default: original]
 ```
 
 ## Auto source behavior
