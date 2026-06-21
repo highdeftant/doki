@@ -9,7 +9,7 @@ Two small TUI apps built on a shared runtime pattern:
 
 - `net-scope` builds and runs from default feature set.
 - `audio-scope` is implemented behind `--features audio`.
-- Audio capture defaults to PipeWire capture-sink via `pw-cat` on Linux; `--safe` keeps a CPAL input-device fallback.
+- Audio capture defaults to PipeWire capture-sink via `pw-cat` on Linux; on non-Linux platforms it defaults to CPAL safe input capture.
 
 ## Build
 
@@ -21,8 +21,12 @@ cargo check
 ## Install runtime deps (audio)
 
 ```bash
+# Linux
 sudo apt-get update
 sudo apt-get install -y libasound2-dev pkg-config
+
+# macOS
+brew install pkg-config
 ```
 
 ## Run
@@ -31,7 +35,7 @@ sudo apt-get install -y libasound2-dev pkg-config
 # Network analyzer
 cargo run --bin net-scope
 
-# Audio visualizer (system audio by default)
+# Audio visualizer
 cargo run --bin audio-scope --features audio
 ```
 
@@ -50,7 +54,7 @@ cargo run --bin audio-scope --features audio -- --list-devices
 # explicit non-monitor capture (opt-out)
 cargo run --bin audio-scope --features audio -- --safe
 
-# explicit monitor capture
+# explicit monitor capture (Linux)
 cargo run --bin audio-scope --features audio -- --device auto
 
 # explicit device selection
@@ -97,11 +101,14 @@ Controls:
 ```
 
 ## Auto source behavior
-`audio-scope --device auto` now prefers system audio / monitor sources by default.
+`audio-scope --device auto` now prefers system audio / monitor sources by default on Linux.
 
-- If a monitor/sink source exists, it will use that.
+- On Linux, if a monitor/sink source exists, it will use that.
 - If no monitor-like source exists, it falls back to the host default input and then the first available device.
 - `--safe` flips the selection to non-monitor inputs.
+- On non-Linux platforms, auto-selection uses safe input capture directly.
+
+On macOS, true system-playback capture still requires a virtual loopback device (for example BlackHole/Soundflower) configured as an input source.
 
 ## Notes
 

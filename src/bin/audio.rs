@@ -81,7 +81,9 @@ struct Cli {
     channels: usize,
     /// Input device name (exact match from available input devices)
     ///
-    /// Pass `auto` (default) to capture system audio by default.
+    /// Pass `auto` (default) to auto-select input capture.
+    ///
+    /// On Linux, this prefers system/monitor sources; on other platforms, safe input capture is used.
     #[arg(short = 'd', long, default_value = "auto")]
     device: String,
     /// Prefer safe non-monitor input sources instead of system audio capture
@@ -365,16 +367,20 @@ fn main() {
     let args = Cli::parse();
 
     if args.list_devices {
-        if let Err(err) = AudioSource::list_input_devices(!args.safe) {
+        let list_system_audio = !args.safe && AudioSource::supports_system_audio_capture();
+        if let Err(err) = AudioSource::list_input_devices(list_system_audio) {
             eprintln!("could not list devices: {err}");
         }
         return;
     }
 
-    if !args.safe {
+    let use_system_audio = !args.safe && AudioSource::supports_system_audio_capture();
+    if use_system_audio {
         eprintln!(
             "system-audio mode active: this will capture playback/monitor sources by default"
         );
+    } else if !AudioSource::supports_system_audio_capture() {
+        eprintln!("system-audio mode is not available on this platform; using safe input capture");
     }
 
     let config = AppConfig {
@@ -388,7 +394,7 @@ fn main() {
         args.sample_rate,
         args.channels,
         args.history,
-        !args.safe,
+        use_system_audio,
     ) {
         Ok(src) => src,
         Err(err) => {
