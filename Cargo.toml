@@ -18,8 +18,12 @@ audio = ["dep:cpal", "dep:rustfft"]
 net = []
 
 [[bin]]
-name = "audio-scope"
+name = "doki"
 path = "src/bin/audio.rs"
+
+[[bin]]
+name = "audio-scope"
+path = "src/bin/audio-scope.rs"
 
 [[bin]]
 name = "net-scope"

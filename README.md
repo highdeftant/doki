@@ -2,40 +2,59 @@
 
 Two small TUI apps built on a shared runtime pattern:
 
+- `doki` / `audio-scope` — live waveform visualization from system audio or an input device (requires `audio` feature)
 - `net-scope` — live WLAN RSSI + RX/TX throughput visualization from `/proc/net/*`
-- `audio-scope` — live waveform visualization from system audio or an input device (requires `audio` feature)
 
 ## Current status
 
 - `net-scope` builds and runs from default feature set.
 - `audio-scope` is implemented behind `--features audio`.
-- Audio capture defaults to PipeWire capture-sink via `pw-cat` on Linux; on non-Linux platforms it defaults to CPAL safe input capture.
+- On Linux, auto audio capture prefers PipeWire monitor sources; on other platforms it defaults to safe CPAL input capture.
 
-## Build
+## Install (Linux/macOS)
+
+### One-liner install/update
 
 ```bash
-cd /home/hinata/hermes/gitrepos/rust/scope-studio
-cargo check
+cargo install --git https://github.com/highdeftant/doki.git \
+  --branch main \
+  --features audio \
+  --locked \
+  --bin doki \
+  --force
 ```
 
-## Install runtime deps (audio)
+### Install from local checkout (recommended for contributors)
 
 ```bash
-# Linux
+cd /home/hinata/hermes/gitrepos/rust/scope-studio-audio
+./scripts/install.sh
+```
+
+### macOS deps
+
+```bash
+brew install pkg-config
+```
+
+### Linux deps
+
+```bash
 sudo apt-get update
 sudo apt-get install -y libasound2-dev pkg-config
-
-# macOS
-brew install pkg-config
 ```
 
 ## Run
 
 ```bash
-# Network analyzer
+# Installed binary
+
+doki
+
+# Or dev run from source
+
 cargo run --bin net-scope
 
-# Audio visualizer
 cargo run --bin audio-scope --features audio
 ```
 
@@ -72,7 +91,7 @@ Controls:
 - `↑/↓` change vertical gain
 - `←/→` change zoom / time span
 - `t` cycle theme
-- `b` cycle background color: `terminal`, `black`, `classic`, `neon`, `ocean`, `mono`, `indigo` (default: `terminal`)
+- `b` cycle background color: `terminal`, `black`, `classic`, `neon`, `ocean`, `mono`, `indigo`, `doki` (default: `terminal`)
 - `wave` is the default and only audio visual style currently.
 
 ## CLI flags
@@ -97,7 +116,7 @@ Controls:
 -l, --list-devices print available input devices and capture hints
 -n, --history      sample history depth [default: 256]
 -w, --width        points in x-axis [default: 512]
--t, --theme        visualization theme: original | classic | neon | ocean | mono [default: original]
+-t, --theme        visualization theme: original | classic | neon | ocean | mono | doki [default: original]
 ```
 
 ## Auto source behavior
@@ -117,4 +136,3 @@ On macOS, true system-playback capture still requires a virtual loopback device 
   - `src/data/*` contains data source modules
   - `src/bin/*` contains app-specific renderer + CLI
   - `src/render.rs` shared chart rendering
-- Linux auto-detect for audio is heuristic; it is intentionally conservative unless `--monitor` is passed.

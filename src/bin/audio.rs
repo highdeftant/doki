@@ -71,7 +71,7 @@ fn theme_background_idx(theme: Theme) -> usize {
 
 #[cfg(feature = "audio")]
 #[derive(Parser)]
-#[command(name = "audio-scope")]
+#[command(name = "doki")]
 struct Cli {
     /// Input sample rate
     #[arg(short = 'r', long, default_value_t = 44_100)]
