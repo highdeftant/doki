@@ -16,7 +16,7 @@ Checkpoint for audio visualizer work in `scope-studio`.
 - Render path now passes explicit background and visual style to the renderer.
 - Kept analyzer behavior in-band: 3-band (`bass`, `mid`, `treble`) reconstruction + peak/rms/clip metrics.
 - Removed fixed x-axis footer labels (`0`, `1/2`, `end`).
-- Kept network analyzer integration untouched and preserved theme/background value behavior.
+- Kept runtime theme/background value behavior and audio controls untouched.
 
 ## Validation
 - `cargo fmt`

@@ -13,9 +13,8 @@ cpal = { version = "0.15", optional = true }
 rustfft = { version = "6", optional = true }
 
 [features]
-default = ["net"]
+default = []
 audio = ["dep:cpal", "dep:rustfft"]
-net = []
 
 [[bin]]
 name = "doki"
@@ -24,7 +23,3 @@ path = "src/bin/audio.rs"
 [[bin]]
 name = "audio-scope"
 path = "src/bin/audio-scope.rs"
-
-[[bin]]
-name = "net-scope"
-path = "src/bin/net.rs"

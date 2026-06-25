@@ -1,18 +1,15 @@
 # doki
 
 `doki` is the primary terminal audio visualizer binary in this repo.
-`audio-scope` is a compatibility alias that keeps existing workflows working.
+`audio-scope` is kept as a compatibility alias so existing workflows keep working.
 
-Both apps share the same Rust runtime; only the binary name changed to make the project naming clear.
+Both binaries share the same Rust runtime; `doki` is the preferred name going forward.
 
 ## Included binaries
 
-- `doki` (`audio-scope`) — waveform TUI from system audio or an input device (requires `audio` feature)
-- `net-scope` — WLAN RSSI + RX/TX throughput visualizer from `/proc/net/*`
+- `doki` (`audio-scope`) — live waveform visualization from system audio or an input device
 
 ## Install
-
-### Install `doki`
 
 ```bash
 cargo install --git https://github.com/highdeftant/doki.git \
@@ -23,26 +20,21 @@ cargo install --git https://github.com/highdeftant/doki.git \
   --force
 ```
 
-### Local install (recommended for dev)
+### Local install (recommended for contributors)
 
 ```bash
 cd /home/hinata/hermes/gitrepos/rust/scope-studio-audio
 ./scripts/install.sh
 ```
 
-This installs `doki` by default and keeps `audio-scope` available for backward compatibility.
-
-## Quick run
+## Run
 
 ```bash
-# Installed binary
 doki
 
-# Direct source run
+# source runs
 cargo run --features audio --bin doki -- --help
-
-# Network app
-cargo run --bin net-scope
+cargo run --features audio --bin audio-scope -- --help
 ```
 
 ## System dependencies
@@ -60,17 +52,17 @@ sudo apt-get install -y libasound2-dev pkg-config
 brew install pkg-config
 ```
 
-## Audio run options
+## Audio usage examples
 
 ```bash
 cargo run --bin audio-scope --features audio -- --sample-rate 44100 --channels 1 --history 256
 cargo run --bin audio-scope --features audio -- --list-devices
-cargo run --bin audio-scope --features audio -- --safe           # prefer non-monitor inputs
-cargo run --bin audio-scope --features audio -- --device auto     # explicit auto-selection
+cargo run --bin audio-scope --features audio -- --safe
+cargo run --bin audio-scope --features audio -- --device auto
 cargo run --bin audio-scope --features audio -- --device "Built-in Audio Analog Stereo"
 ```
 
-## Runtime controls
+## Controls
 
 - `q` or `Ctrl+c` exit
 - `space` pause
@@ -97,17 +89,9 @@ cargo run --bin audio-scope --features audio -- --device "Built-in Audio Analog 
 -t, --theme        original | classic | neon | ocean | mono | doki [default: original]
 ```
 
-### net-scope flags
-
-```bash
--i, --interface    wireless interface (auto-detect)
--w, --width        points in x-axis [default: 240]
--s, --sleep-ms     poll interval in ms [default: 250]
--n, --history      sample history depth [default: 120]
-```
-
 ## Auto-capture behavior
 
-`--device auto` prefers system/monitor audio sources by default on Linux. If no monitor is found, it falls back to input sources. Use `--safe` to force non-monitor capture.
+`--device auto` prefers system/monitor audio sources by default on Linux. If no monitor source is found, it falls back to input sources.
+Use `--safe` to force non-monitor capture.
 
-On macOS, system playback capture usually still requires a virtual loopback input (such as BlackHole/Soundflower).
+On macOS, system playback capture generally still requires a virtual loopback device (such as BlackHole or Soundflower).
