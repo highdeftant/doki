@@ -1,19 +1,18 @@
-# scope-studio
+# doki
 
-Two small TUI apps built on a shared runtime pattern:
+`doki` is the primary terminal audio visualizer binary in this repo.
+`audio-scope` is a compatibility alias that keeps existing workflows working.
 
-- `doki` / `audio-scope` — live waveform visualization from system audio or an input device (requires `audio` feature)
-- `net-scope` — live WLAN RSSI + RX/TX throughput visualization from `/proc/net/*`
+Both apps share the same Rust runtime; only the binary name changed to make the project naming clear.
 
-## Current status
+## Included binaries
 
-- `net-scope` builds and runs from default feature set.
-- `audio-scope` is implemented behind `--features audio`.
-- On Linux, auto audio capture prefers PipeWire monitor sources; on other platforms it defaults to safe CPAL input capture.
+- `doki` (`audio-scope`) — waveform TUI from system audio or an input device (requires `audio` feature)
+- `net-scope` — WLAN RSSI + RX/TX throughput visualizer from `/proc/net/*`
 
-## Install (Linux/macOS)
+## Install
 
-### One-liner install/update
+### Install `doki`
 
 ```bash
 cargo install --git https://github.com/highdeftant/doki.git \
@@ -24,79 +23,81 @@ cargo install --git https://github.com/highdeftant/doki.git \
   --force
 ```
 
-### Install from local checkout (recommended for contributors)
+### Local install (recommended for dev)
 
 ```bash
 cd /home/hinata/hermes/gitrepos/rust/scope-studio-audio
 ./scripts/install.sh
 ```
 
-### macOS deps
+This installs `doki` by default and keeps `audio-scope` available for backward compatibility.
+
+## Quick run
 
 ```bash
-brew install pkg-config
+# Installed binary
+doki
+
+# Direct source run
+cargo run --features audio --bin doki -- --help
+
+# Network app
+cargo run --bin net-scope
 ```
 
-### Linux deps
+## System dependencies
+
+### Linux
 
 ```bash
 sudo apt-get update
 sudo apt-get install -y libasound2-dev pkg-config
 ```
 
-## Run
+### macOS
 
 ```bash
-# Installed binary
-
-doki
-
-# Or dev run from source
-
-cargo run --bin net-scope
-
-cargo run --bin audio-scope --features audio
+brew install pkg-config
 ```
 
-You can pass args:
+## Audio run options
 
 ```bash
-# network
-cargo run --bin net-scope -- --interface wlan0 --width 240 --sleep-ms 250 --history 120
-
-# audio
 cargo run --bin audio-scope --features audio -- --sample-rate 44100 --channels 1 --history 256
-
-# quick device discovery
 cargo run --bin audio-scope --features audio -- --list-devices
-
-# explicit non-monitor capture (opt-out)
-cargo run --bin audio-scope --features audio -- --safe
-
-# explicit monitor capture (Linux)
-cargo run --bin audio-scope --features audio -- --device auto
-
-# explicit device selection
+cargo run --bin audio-scope --features audio -- --safe           # prefer non-monitor inputs
+cargo run --bin audio-scope --features audio -- --device auto     # explicit auto-selection
 cargo run --bin audio-scope --features audio -- --device "Built-in Audio Analog Stereo"
 ```
 
-Controls:
+## Runtime controls
 
 - `q` or `Ctrl+c` exit
 - `space` pause
 - `h` hide/show UI chrome
-- `r` reset gain/zoom to the default view
-- `p` cycle view presets
+- `r` reset gain/zoom
+- `p` cycle presets
 - `w` cycle wave count: `3`, `2`, `1`
-- `↑/↓` change vertical gain
-- `←/→` change zoom / time span
 - `t` cycle theme
-- `b` cycle background color: `terminal`, `black`, `classic`, `neon`, `ocean`, `mono`, `indigo`, `doki` (default: `terminal`)
-- `wave` is the default and only audio visual style currently.
+- `b` cycle background color
+- `↑/↓` vertical gain
+- `←/→` zoom / time span
 
-## CLI flags
+### Audio CLI flags
 
-### net-scope
+```bash
+-r, --sample-rate  sample rate [default: 44100]
+-c, --channels     input channels (1-2) [default: 1]
+-d, --device       input device name (default: auto)
+--safe             prefer non-monitor inputs
+-s, --sleep-ms     render interval in ms [default: 16]
+-l, --list-devices print available input devices
+-n, --history      sample history depth [default: 256]
+-w, --width        points in x-axis [default: 512]
+-t, --theme        original | classic | neon | ocean | mono | doki [default: original]
+```
+
+### net-scope flags
 
 ```bash
 -i, --interface    wireless interface (auto-detect)
@@ -105,34 +106,8 @@ Controls:
 -n, --history      sample history depth [default: 120]
 ```
 
-### audio-scope
+## Auto-capture behavior
 
-```bash
--r, --sample-rate  sample rate [default: 44100]
--c, --channels     input channels (1-2) [default: 1]
--d, --device       input device name from system (default: auto)
---safe            prefer safe non-monitor inputs (opt-out)
--s, --sleep-ms     render refresh interval in ms [default: 16]
--l, --list-devices print available input devices and capture hints
--n, --history      sample history depth [default: 256]
--w, --width        points in x-axis [default: 512]
--t, --theme        visualization theme: original | classic | neon | ocean | mono | doki [default: original]
-```
+`--device auto` prefers system/monitor audio sources by default on Linux. If no monitor is found, it falls back to input sources. Use `--safe` to force non-monitor capture.
 
-## Auto source behavior
-`audio-scope --device auto` now prefers system audio / monitor sources by default on Linux.
-
-- On Linux, if a monitor/sink source exists, it will use that.
-- If no monitor-like source exists, it falls back to the host default input and then the first available device.
-- `--safe` flips the selection to non-monitor inputs.
-- On non-Linux platforms, auto-selection uses safe input capture directly.
-
-On macOS, true system-playback capture still requires a virtual loopback device (for example BlackHole/Soundflower) configured as an input source.
-
-## Notes
-
-- The scope uses a minimal shared architecture:
-  - `src/lib.rs` handles event loop + terminal lifecycle
-  - `src/data/*` contains data source modules
-  - `src/bin/*` contains app-specific renderer + CLI
-  - `src/render.rs` shared chart rendering
+On macOS, system playback capture usually still requires a virtual loopback input (such as BlackHole/Soundflower).
