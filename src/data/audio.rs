@@ -1,4 +1,6 @@
 #[cfg(feature = "audio")]
+use std::collections::VecDeque;
+#[cfg(feature = "audio")]
 use std::fs::File;
 #[cfg(feature = "audio")]
 use std::io::{self, Read};
@@ -24,7 +26,7 @@ pub enum AudioSource {
 
 #[cfg(feature = "audio")]
 pub struct SystemCapture {
-    samples: Arc<Mutex<Vec<f64>>>,
+    samples: Arc<Mutex<VecDeque<f64>>>,
     _child: Child,
     _reader: Option<JoinHandle<()>>,
     pub history: usize,
@@ -32,7 +34,7 @@ pub struct SystemCapture {
 
 #[cfg(feature = "audio")]
 pub struct SafeCapture {
-    samples: Arc<Mutex<Vec<f64>>>,
+    samples: Arc<Mutex<VecDeque<f64>>>,
     _stream: cpal::Stream,
     pub history: usize,
 }
@@ -48,13 +50,6 @@ impl AudioSource {
     ) -> anyhow::Result<Self> {
         if monitor_preferred && Self::supports_system_audio_capture() {
             Ok(Self::System(SystemCapture::new(
-                device,
-                sample_rate,
-                channels,
-                history,
-            )?))
-        } else if monitor_preferred && !Self::supports_system_audio_capture() {
-            Ok(Self::Safe(SafeCapture::new(
                 device,
                 sample_rate,
                 channels,
@@ -109,7 +104,7 @@ impl SystemCapture {
         history: usize,
     ) -> anyhow::Result<Self> {
         let channels = channels.clamp(1, 2);
-        let samples = Arc::new(Mutex::new(Vec::new()));
+        let samples = Arc::new(Mutex::new(VecDeque::with_capacity(history)));
         let reader_state = Arc::clone(&samples);
         let history_cap = history;
         let monitor = device.trim();
@@ -185,7 +180,7 @@ impl SafeCapture {
             )
         };
 
-        let shared = Arc::new(Mutex::new(Vec::new()));
+        let shared = Arc::new(Mutex::new(VecDeque::with_capacity(history)));
         let callback_state = Arc::clone(&shared);
 
         let stream = match cfg.sample_format() {
@@ -196,7 +191,7 @@ impl SafeCapture {
                     |err| eprintln!("audio stream error: {err}"),
                     None,
                 )
-                .map_err(|err| stream_err(err))?,
+                .map_err(&stream_err)?,
             cpal::SampleFormat::I16 => device
                 .build_input_stream(
                     &stream_config,
@@ -204,7 +199,7 @@ impl SafeCapture {
                     |err| eprintln!("audio stream error: {err}"),
                     None,
                 )
-                .map_err(|err| stream_err(err))?,
+                .map_err(&stream_err)?,
             cpal::SampleFormat::I32 => device
                 .build_input_stream(
                     &stream_config,
@@ -212,7 +207,7 @@ impl SafeCapture {
                     |err| eprintln!("audio stream error: {err}"),
                     None,
                 )
-                .map_err(|err| stream_err(err))?,
+                .map_err(&stream_err)?,
             cpal::SampleFormat::U16 => device
                 .build_input_stream(
                     &stream_config,
@@ -220,7 +215,7 @@ impl SafeCapture {
                     |err| eprintln!("audio stream error: {err}"),
                     None,
                 )
-                .map_err(|err| stream_err(err))?,
+                .map_err(&stream_err)?,
             _ => return Err(anyhow::anyhow!("unsupported sample format")),
         };
 
@@ -260,7 +255,7 @@ impl SafeCapture {
 
         if let Some(default_name) = default_name.as_deref() {
             if let Some((idx, _)) = candidates.iter().enumerate().find(|(_, (name, _))| {
-                name == &default_name && !is_likely_system_output_capture(name)
+                name == default_name && !is_likely_system_output_capture(name)
             }) {
                 return Ok(candidates.swap_remove(idx).1);
             }
@@ -319,36 +314,32 @@ fn list_safe_input_devices(
 }
 
 #[cfg(feature = "audio")]
+fn snapshot_frame(
+    samples: &Arc<Mutex<VecDeque<f64>>>,
+    history: usize,
+) -> io::Result<Option<Matrix>> {
+    let state = samples.lock().unwrap_or_else(|e| e.into_inner());
+    if state.is_empty() {
+        return Ok(Some(vec![vec![0.0; 2]]));
+    }
+
+    let len = state.len().min(history);
+    let start = state.len() - len;
+    let window: Vec<f64> = state.iter().skip(start).copied().collect();
+    Ok(Some(vec![window]))
+}
+
+#[cfg(feature = "audio")]
 impl DataSource for SystemCapture {
     fn next_frame(&mut self) -> io::Result<Option<Matrix>> {
-        let state = self.samples.lock().unwrap_or_else(|e| e.into_inner());
-        if state.is_empty() {
-            return Ok(Some(vec![vec![0.0; 2]]));
-        }
-
-        let window = if state.len() > self.history {
-            state[state.len() - self.history..].to_vec()
-        } else {
-            state.clone()
-        };
-        Ok(Some(vec![window]))
+        snapshot_frame(&self.samples, self.history)
     }
 }
 
 #[cfg(feature = "audio")]
 impl DataSource for SafeCapture {
     fn next_frame(&mut self) -> io::Result<Option<Matrix>> {
-        let state = self.samples.lock().unwrap_or_else(|e| e.into_inner());
-        if state.is_empty() {
-            return Ok(Some(vec![vec![0.0; 2]]));
-        }
-
-        let window = if state.len() > self.history {
-            state[state.len() - self.history..].to_vec()
-        } else {
-            state.clone()
-        };
-        Ok(Some(vec![window]))
+        snapshot_frame(&self.samples, self.history)
     }
 }
 
@@ -452,7 +443,7 @@ unsafe extern "C" {
 fn read_pwcat_stdout(
     mut stdout: impl Read + Send + 'static,
     channels: usize,
-    state: Arc<Mutex<Vec<f64>>>,
+    state: Arc<Mutex<VecDeque<f64>>>,
     history: usize,
 ) {
     let mut pending = Vec::<u8>::new();
@@ -471,23 +462,21 @@ fn read_pwcat_stdout(
             continue;
         }
 
-        let mut frame = Vec::with_capacity(usable / 4);
-        for chunk in pending[..usable].chunks_exact(4) {
-            let sample = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
-            frame.push(sample as f64);
-        }
+        let samples = pending[..usable]
+            .chunks_exact(4)
+            .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]) as f64);
+        push_averages(samples, channels, &state, history);
         pending.drain(..usable);
-        push_averages(frame.into_iter(), channels, &state, history);
     }
 }
 
 #[cfg(feature = "audio")]
-fn sample_cb_f32(data: &[f32], channels: usize, state: &Arc<Mutex<Vec<f64>>>, history: usize) {
+fn sample_cb_f32(data: &[f32], channels: usize, state: &Arc<Mutex<VecDeque<f64>>>, history: usize) {
     push_averages(data.iter().map(|s| *s as f64), channels, state, history);
 }
 
 #[cfg(feature = "audio")]
-fn sample_cb_i16(data: &[i16], channels: usize, state: &Arc<Mutex<Vec<f64>>>, history: usize) {
+fn sample_cb_i16(data: &[i16], channels: usize, state: &Arc<Mutex<VecDeque<f64>>>, history: usize) {
     push_averages(
         data.iter().map(|s| *s as f64 / i16::MAX as f64),
         channels,
@@ -497,7 +486,7 @@ fn sample_cb_i16(data: &[i16], channels: usize, state: &Arc<Mutex<Vec<f64>>>, hi
 }
 
 #[cfg(feature = "audio")]
-fn sample_cb_i32(data: &[i32], channels: usize, state: &Arc<Mutex<Vec<f64>>>, history: usize) {
+fn sample_cb_i32(data: &[i32], channels: usize, state: &Arc<Mutex<VecDeque<f64>>>, history: usize) {
     push_averages(
         data.iter().map(|s| *s as f64 / i32::MAX as f64),
         channels,
@@ -507,7 +496,7 @@ fn sample_cb_i32(data: &[i32], channels: usize, state: &Arc<Mutex<Vec<f64>>>, hi
 }
 
 #[cfg(feature = "audio")]
-fn sample_cb_u16(data: &[u16], channels: usize, state: &Arc<Mutex<Vec<f64>>>, history: usize) {
+fn sample_cb_u16(data: &[u16], channels: usize, state: &Arc<Mutex<VecDeque<f64>>>, history: usize) {
     push_averages(
         data.iter()
             .map(|s| (*s as f64 / u16::MAX as f64) * 2.0 - 1.0),
@@ -521,10 +510,11 @@ fn sample_cb_u16(data: &[u16], channels: usize, state: &Arc<Mutex<Vec<f64>>>, hi
 fn push_averages(
     samples: impl Iterator<Item = f64>,
     channels: usize,
-    state: &Arc<Mutex<Vec<f64>>>,
+    state: &Arc<Mutex<VecDeque<f64>>>,
     history: usize,
 ) {
-    let mut frame = Vec::new();
+    let channels = channels.clamp(1, 2);
+    let mut guard = state.lock().unwrap_or_else(|e| e.into_inner());
     let mut acc = 0.0;
     let mut count = 0usize;
 
@@ -532,20 +522,17 @@ fn push_averages(
         acc += sample;
         count += 1;
         if count == channels {
-            frame.push((acc / channels as f64).clamp(-1.0, 1.0));
+            guard.push_back((acc / channels as f64).clamp(-1.0, 1.0));
             acc = 0.0;
             count = 0;
         }
     }
 
-    if frame.is_empty() {
+    if guard.is_empty() {
         return;
     }
 
-    let mut guard = state.lock().unwrap_or_else(|e| e.into_inner());
-    guard.extend(frame);
-    if guard.len() > history {
-        let excess = guard.len() - history;
-        guard.drain(0..excess);
+    while guard.len() > history {
+        guard.pop_front();
     }
 }

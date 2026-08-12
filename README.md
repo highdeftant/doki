@@ -71,23 +71,41 @@ cargo run --bin audio-scope --features audio -- --device "Built-in Audio Analog 
 - `p` cycle presets
 - `w` cycle wave count: `3`, `2`, `1`
 - `t` cycle theme
+- `v` cycle visual mode: `line`, `persistence`
 - `b` cycle background color
+- `c` toggle slow RGB hue cycling on waves
 - `↑/↓` vertical gain
 - `←/→` zoom / time span
 
 ### Audio CLI flags
 
 ```bash
--r, --sample-rate  sample rate [default: 44100]
--c, --channels     input channels (1-2) [default: 1]
--d, --device       input device name (default: auto)
---safe             prefer non-monitor inputs
--s, --sleep-ms     render interval in ms [default: 16]
--l, --list-devices print available input devices
--n, --history      sample history depth [default: 256]
--w, --width        points in x-axis [default: 512]
--t, --theme        original | classic | neon | ocean | mono | doki [default: original]
+-r, --sample-rate      sample rate [default: 44100]
+-c, --channels         input channels (1-2) [default: 1]
+-d, --device           input device name (default: auto)
+--safe                 prefer non-monitor inputs
+-t, --theme            original | classic | neon | ocean | mono | doki | pinboard [default: original]
+--rgb-wave             enable RGB hue-cycling on waves
+    --rgb-speed         hue increment per frame (degrees) [default: 0.5]
+-m, --visual-mode      line | persistence [default: line]
+
+    --persistence-window  persistence depth [default: 12]
+    --wave-count        waveform bands (1/2/3) [default: 3]
+-l, --list-devices     print available input devices
+-n, --history          sample history depth [default: 256]
+-w, --width            points in x-axis [default: 512]
+-s, --sleep-ms         render interval in ms [default: 42]
 ```
+
+### Performance knob
+
+If UI is too heavy, start with:
+
+```bash
+cargo run --release --bin doki --features audio -- --wave-count 1 --sleep-ms 50
+```
+
+`--wave-count 1` disables most per-band FFT work and is usually the biggest CPU win.
 
 ## Auto-capture behavior
 

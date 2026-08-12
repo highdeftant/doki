@@ -33,7 +33,7 @@ impl Default for AppConfig {
             show_ui: true,
             show_help: false,
             view_preset: 0,
-            sleep_ms: 16,
+            sleep_ms: 42,
         }
     }
 }
@@ -55,39 +55,13 @@ impl AppConfig {
     }
 }
 
-#[derive(Debug)]
-pub struct RingBuffer {
-    pub data: std::collections::VecDeque<f64>,
-    pub cap: usize,
-}
-
-impl RingBuffer {
-    pub fn new(cap: usize) -> Self {
-        Self {
-            data: std::collections::VecDeque::with_capacity(cap),
-            cap,
-        }
-    }
-
-    pub fn push(&mut self, value: f64) {
-        if self.data.len() == self.cap {
-            let _ = self.data.pop_front();
-        }
-        self.data.push_back(value);
-    }
-
-    pub fn snapshot(&self) -> Vec<f64> {
-        self.data.iter().copied().collect()
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum VisualStyle {
     Line,
+    Persistence,
 }
 
 pub trait Renderer {
-    fn mode_name(&self) -> &'static str;
     fn header(&self) -> String;
     fn y_bounds(&self, _cfg: &AppConfig) -> (f64, f64);
     fn process(&mut self, cfg: &AppConfig, frame: &SourceFrame) -> Vec<render::Series>;
@@ -106,95 +80,93 @@ pub fn run_app<S: DataSource, R: Renderer>(
     mut cfg: AppConfig,
 ) -> anyhow::Result<()> {
     let mut terminal = render::init_terminal()?;
-    let mut fps = 0usize;
-    let mut framerate = 0usize;
-    let mut last_tick = Instant::now();
+    let mut render_scratch = render::RenderScratch::default();
 
     loop {
+        let loop_start = Instant::now();
+
         if let Some(frame) = source.next_frame()? {
             if !cfg.pause {
                 let series = renderer.process(&cfg, &frame);
                 let (y_min, y_max) = renderer.y_bounds(&cfg);
+                let header = cfg.show_ui.then(|| renderer.header());
                 render::draw_frame(
                     &mut terminal,
                     &series,
-                    &cfg,
-                    renderer.mode_name(),
-                    &renderer.header(),
-                    framerate,
-                    y_min,
-                    y_max,
-                    renderer.background_color(),
-                    renderer.visual_style(),
+                    &mut render_scratch,
+                    render::RenderParams {
+                        cfg: &cfg,
+                        header: header.as_deref(),
+                        y_bounds: (y_min, y_max),
+                        background: renderer.background_color(),
+                        style: renderer.visual_style(),
+                    },
                 )?;
-            }
-
-            fps += 1;
-            if last_tick.elapsed().as_secs() >= 1 {
-                framerate = fps;
-                fps = 0;
-                last_tick = Instant::now();
             }
         }
 
-        if crossterm::event::poll(Duration::from_millis(cfg.sleep_ms))? {
-            while crossterm::event::poll(Duration::from_millis(0))? {
-                let event = crossterm::event::read()?;
-                match event {
-                    crossterm::event::Event::Key(key)
-                        if key.kind == crossterm::event::KeyEventKind::Press =>
-                    {
-                        match (key.modifiers, key.code) {
-                            (
-                                crossterm::event::KeyModifiers::CONTROL,
-                                crossterm::event::KeyCode::Char('c'),
-                            )
-                            | (
-                                crossterm::event::KeyModifiers::CONTROL,
-                                crossterm::event::KeyCode::Char('q'),
-                            ) => {
-                                render::restore_terminal()?;
-                                return Ok(());
-                            }
-                            (_, crossterm::event::KeyCode::Char('q')) => {
-                                render::restore_terminal()?;
-                                return Ok(());
-                            }
-                            (_, crossterm::event::KeyCode::Esc)
-                            | (_, crossterm::event::KeyCode::Char('?'))
-                                if cfg.show_help =>
-                            {
-                                cfg.show_help = false;
-                            }
-                            (_, _) if cfg.show_help => {}
-                            (_, crossterm::event::KeyCode::Char('?')) => cfg.show_help = true,
-                            (_, crossterm::event::KeyCode::Char('r')) => cfg.reset_view(),
-                            (_, crossterm::event::KeyCode::Char('p')) => cfg.cycle_view_preset(),
-                            (_, crossterm::event::KeyCode::Char(' ')) => cfg.pause = !cfg.pause,
-                            (_, crossterm::event::KeyCode::Char('h')) => cfg.show_ui = !cfg.show_ui,
-                            (_, crossterm::event::KeyCode::Up) => {
-                                cfg.scale = (cfg.scale + 0.1).min(8.0);
-                            }
-                            (_, crossterm::event::KeyCode::Down) => {
-                                cfg.scale = (cfg.scale - 0.1).max(0.05);
-                            }
-                            (_, crossterm::event::KeyCode::Right) => {
-                                cfg.zoom = (cfg.zoom + 0.25).min(16.0);
-                            }
-                            (_, crossterm::event::KeyCode::Left) => {
-                                cfg.zoom = (cfg.zoom - 0.25).max(0.5);
-                            }
-                            (_, _) => {
-                                renderer.handle_event(&event, &mut cfg);
-                            }
+        while crossterm::event::poll(Duration::from_millis(0))? {
+            let event = crossterm::event::read()?;
+            match event {
+                crossterm::event::Event::Key(key)
+                    if key.kind == crossterm::event::KeyEventKind::Press =>
+                {
+                    match (key.modifiers, key.code) {
+                        (
+                            crossterm::event::KeyModifiers::CONTROL,
+                            crossterm::event::KeyCode::Char('c'),
+                        )
+                        | (
+                            crossterm::event::KeyModifiers::CONTROL,
+                            crossterm::event::KeyCode::Char('q'),
+                        ) => {
+                            render::restore_terminal()?;
+                            return Ok(());
+                        }
+                        (_, crossterm::event::KeyCode::Char('q')) => {
+                            render::restore_terminal()?;
+                            return Ok(());
+                        }
+                        (_, crossterm::event::KeyCode::Esc)
+                        | (_, crossterm::event::KeyCode::Char('?'))
+                            if cfg.show_help =>
+                        {
+                            cfg.show_help = false;
+                        }
+                        (_, _) if cfg.show_help => {}
+                        (_, crossterm::event::KeyCode::Char('?')) => cfg.show_help = true,
+                        (_, crossterm::event::KeyCode::Char('r')) => cfg.reset_view(),
+                        (_, crossterm::event::KeyCode::Char('p')) => cfg.cycle_view_preset(),
+                        (_, crossterm::event::KeyCode::Char(' ')) => cfg.pause = !cfg.pause,
+                        (_, crossterm::event::KeyCode::Char('h')) => cfg.show_ui = !cfg.show_ui,
+                        (_, crossterm::event::KeyCode::Up) => {
+                            cfg.scale = (cfg.scale + 0.1).min(8.0);
+                        }
+                        (_, crossterm::event::KeyCode::Down) => {
+                            cfg.scale = (cfg.scale - 0.1).max(0.05);
+                        }
+                        (_, crossterm::event::KeyCode::Right) => {
+                            cfg.zoom = (cfg.zoom + 0.25).min(16.0);
+                        }
+                        (_, crossterm::event::KeyCode::Left) => {
+                            cfg.zoom = (cfg.zoom - 0.25).max(0.5);
+                        }
+                        (_, _) => {
+                            renderer.handle_event(&event, &mut cfg);
                         }
                     }
-                    crossterm::event::Event::Mouse(_) => {}
-                    _ => {}
                 }
+                crossterm::event::Event::Mouse(_) => {}
+                _ => {}
             }
-        } else {
-            std::thread::sleep(Duration::from_millis(cfg.sleep_ms));
+        }
+
+        if cfg.sleep_ms > 0 {
+            if let Some(remaining) =
+                Duration::from_millis(cfg.sleep_ms).checked_sub(loop_start.elapsed())
+            {
+                std::thread::sleep(remaining);
+            }
         }
     }
 }
