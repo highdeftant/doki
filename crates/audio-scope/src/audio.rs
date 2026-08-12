@@ -12,9 +12,9 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 
 #[cfg(feature = "audio")]
-use crate::{DataSource, Matrix};
-#[cfg(feature = "audio")]
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+#[cfg(feature = "audio")]
+use scope_core::{DataSource, Matrix};
 
 #[cfg(feature = "audio")]
 pub enum AudioSource {

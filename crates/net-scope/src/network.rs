@@ -1,6 +1,6 @@
 use std::{fs, io, time::Instant};
 
-use crate::{DataSource, Matrix, RingBuffer};
+use scope_core::{DataSource, Matrix, RingBuffer};
 
 #[derive(Debug)]
 pub struct NetSource {

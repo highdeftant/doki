@@ -199,5 +199,5 @@ pub fn run_app<S: DataSource, R: Renderer>(
     }
 }
 
-pub mod data;
 pub mod render;
+pub use render::Series;

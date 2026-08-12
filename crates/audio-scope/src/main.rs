@@ -1,13 +1,10 @@
-#[cfg(feature = "audio")]
 use clap::{Parser, ValueEnum};
-#[cfg(feature = "audio")]
 use ratatui::style::Color;
-#[cfg(feature = "audio")]
 use rustfft::{num_complex::Complex, FftPlanner};
-#[cfg(feature = "audio")]
-use scope_studio::{
-    data::audio::AudioSource, render::Series, run_app, AppConfig, Matrix, Renderer, VisualStyle,
-};
+use scope_core::{run_app, AppConfig, Matrix, Renderer, Series, VisualStyle};
+
+mod audio;
+use crate::audio::AudioSource;
 
 #[cfg(feature = "audio")]
 #[derive(Clone, Copy, Debug, ValueEnum)]

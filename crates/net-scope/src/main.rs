@@ -1,8 +1,9 @@
 use clap::Parser;
 use ratatui::style::Color;
-use scope_studio::{
-    data::network::NetSource, render::Series, run_app, AppConfig, Matrix, Renderer,
-};
+use scope_core::{run_app, AppConfig, Matrix, Renderer, Series};
+
+mod network;
+use crate::network::NetSource;
 
 #[derive(Parser)]
 #[command(name = "net-scope")]
