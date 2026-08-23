@@ -1,2 +1,3 @@
 target/
 /.hermes/plans/
+/.cron/
