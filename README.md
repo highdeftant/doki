@@ -1,15 +1,10 @@
 # scope-studio
 
-Two small TUI apps built on a shared runtime pattern:
+A two-crate workspace with two separate apps:
 
-- `net-scope` — live WLAN RSSI + RX/TX throughput visualization from `/proc/net/*`
-- `audio-scope` — live waveform visualization from system audio or an input device (requires `audio` feature)
-
-## Current status
-
-- `net-scope` builds and runs from default feature set.
-- `audio-scope` is implemented behind `--features audio`.
-- Audio capture defaults to PipeWire capture-sink via `pw-cat` on Linux; `--safe` keeps a CPAL input-device fallback.
+- `crates/net-scope` — live WLAN RSSI + RX/TX throughput visualization from `/proc/net/*`
+- `crates/audio-scope` — live waveform visualization from system audio or an input device
+- `crates/scope-core` — shared terminal/runtime primitives (event loop + renderer)
 
 ## Build
 
@@ -18,96 +13,65 @@ cd /home/hinata/hermes/gitrepos/rust/scope-studio
 cargo check
 ```
 
-## Install runtime deps (audio)
+`cargo check` builds all workspace members (`scope-core`, `audio-scope`, `net-scope`) by default.
+
+## Build + run audio app
 
 ```bash
-sudo apt-get update
-sudo apt-get install -y libasound2-dev pkg-config
+cargo check -p audio-scope
+cargo run -p audio-scope
 ```
 
-## Run
+`audio-scope` enables audio dependencies via its default `audio` feature, so this compiles out-of-the-box from this workspace.
 
 ```bash
-# Network analyzer
-cargo run --bin net-scope
+# run with args
+cargo run -p audio-scope -- --sample-rate 44100 --channels 1 --history 256
 
-# Audio visualizer (system audio by default)
-cargo run --bin audio-scope --features audio
-```
-
-You can pass args:
-
-```bash
-# network
-cargo run --bin net-scope -- --interface wlan0 --width 240 --sleep-ms 250 --history 120
-
-# audio
-cargo run --bin audio-scope --features audio -- --sample-rate 44100 --channels 1 --history 256
-
-# quick device discovery
-cargo run --bin audio-scope --features audio -- --list-devices
+# device list
+cargo run -p audio-scope -- --list-devices
 
 # explicit non-monitor capture (opt-out)
-cargo run --bin audio-scope --features audio -- --safe
+cargo run -p audio-scope -- --safe
 
 # explicit monitor capture
-cargo run --bin audio-scope --features audio -- --device auto
+cargo run -p audio-scope -- --device auto
 
 # explicit device selection
-cargo run --bin audio-scope --features audio -- --device "Built-in Audio Analog Stereo"
+cargo run -p audio-scope -- --device "Built-in Audio Analog Stereo"
 ```
 
-Controls:
+## Run net app
+
+```bash
+cargo run -p net-scope
+
+cargo run -p net-scope -- --interface wlan0 --width 240 --sleep-ms 250 --history 120
+```
+
+## Controls
+
+Shared runtime controls:
 
 - `q` or `Ctrl+c` exit
 - `space` pause
 - `h` hide/show UI chrome
 - `r` reset gain/zoom to the default view
 - `p` cycle view presets
-- `w` cycle wave count: `3`, `2`, `1`
 - `↑/↓` change vertical gain
 - `←/→` change zoom / time span
+
+Audio-only controls (`audio-scope`):
+
+- `w` cycle wave count: `3`, `2`, `1`
 - `t` cycle theme
 - `b` cycle background color: `terminal`, `black`, `classic`, `neon`, `ocean`, `mono`, `indigo` (default: `terminal`)
 - `wave` is the default and only audio visual style currently.
 
-## CLI flags
-
-### net-scope
-
-```bash
--i, --interface    wireless interface (auto-detect)
--w, --width        points in x-axis [default: 240]
--s, --sleep-ms     poll interval in ms [default: 250]
--n, --history      sample history depth [default: 120]
-```
-
-### audio-scope
-
-```bash
--r, --sample-rate  sample rate [default: 44100]
--c, --channels     input channels (1-2) [default: 1]
--d, --device       input device name from system (default: auto)
---safe            prefer safe non-monitor inputs (opt-out)
--s, --sleep-ms     render refresh interval in ms [default: 16]
--l, --list-devices print available input devices and capture hints
--n, --history      sample history depth [default: 256]
--w, --width        points in x-axis [default: 512]
--t, --theme        visualization theme: original | classic | neon | ocean | mono [default: original]
-```
-
 ## Auto source behavior
-`audio-scope --device auto` now prefers system audio / monitor sources by default.
+
+`audio-scope --device auto` prefers system audio / monitor sources by default.
 
 - If a monitor/sink source exists, it will use that.
-- If no monitor-like source exists, it falls back to the host default input and then the first available device.
+- If no monitor-like source exists, it falls back to host default input and then first available device.
 - `--safe` flips the selection to non-monitor inputs.
-
-## Notes
-
-- The scope uses a minimal shared architecture:
-  - `src/lib.rs` handles event loop + terminal lifecycle
-  - `src/data/*` contains data source modules
-  - `src/bin/*` contains app-specific renderer + CLI
-  - `src/render.rs` shared chart rendering
-- Linux auto-detect for audio is heuristic; it is intentionally conservative unless `--monitor` is passed.

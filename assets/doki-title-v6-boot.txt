@@ -1,0 +1,5 @@
+[38;2;0;200;80m◉[0m [38;2;220;220;220minitializing audio pipeline...[0m
+[38;2;0;200;80m◉[0m [38;2;220;220;220mloading FFT plan (1024 bins)[0m
+[38;2;0;200;80m◉[0m [38;2;220;220;220mattaching render backend[0m
+[38;2;0;200;80m◉[0m [38;2;140;100;255m[1mDOKI[0m[0m  [38;2;255;0;180mready[0m
+                                      [38;2;80;80;80mScope Studio[0m

@@ -1,0 +1,17 @@
+[package]
+name = "audio-scope"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0"
+clap = { version = "4.5", features = ["derive"] }
+crossterm = "0.29"
+ratatui = "0.29"
+rustfft = { version = "6", optional = true }
+cpal = { version = "0.15", optional = true }
+scope-core = { path = "../scope-core" }
+
+[features]
+default = ["audio"]
+audio = ["dep:cpal", "dep:rustfft"]
