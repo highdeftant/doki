@@ -1,5 +1,6 @@
 use clap::Parser;
 use ratatui::style::Color;
+use scope_core::render::Palette;
 use scope_core::{run_app, AppConfig, Matrix, Renderer, Series};
 
 mod network;
@@ -28,11 +29,6 @@ struct NetRenderer {
 }
 
 impl NetRenderer {
-    fn trim_samples(row: &[f64], cfg: &AppConfig) -> Vec<f64> {
-        let start = row.len().saturating_sub(cfg.width);
-        row.iter().skip(start).copied().collect()
-    }
-
     fn calculate_bounds(frame: &Matrix) -> (f64, f64) {
         let mut min_v = f64::INFINITY;
         let mut max_v = f64::NEG_INFINITY;
@@ -52,10 +48,6 @@ impl NetRenderer {
 }
 
 impl Renderer for NetRenderer {
-    fn mode_name(&self) -> &'static str {
-        "net"
-    }
-
     fn header(&self) -> String {
         "RSSI / Throughput".to_string()
     }
@@ -64,21 +56,29 @@ impl Renderer for NetRenderer {
         self.last_minmax
     }
 
-    fn process(&mut self, cfg: &AppConfig, frame: &Matrix) -> Vec<Series> {
+    fn process(&mut self, cfg: &AppConfig, frame: &Matrix, series: &mut Vec<Series>) {
         self.last_minmax = Self::calculate_bounds(frame);
 
         let names = ["rssi_dbm", "noise_dbm", "rx_mbps", "tx_mbps"];
         let colors = [Color::Cyan, Color::Blue, Color::Magenta, Color::Green];
 
-        frame
-            .iter()
-            .enumerate()
-            .map(|(idx, row)| Series {
-                name: names.get(idx).copied().unwrap_or("signal").to_string(),
-                color: *colors.get(idx).unwrap_or(&Color::White),
-                samples: Self::trim_samples(row, cfg),
-            })
-            .collect()
+        series.truncate(frame.len());
+        for (idx, row) in frame.iter().enumerate() {
+            if idx == series.len() {
+                series.push(Series {
+                    name: names.get(idx).copied().unwrap_or("signal").to_string(),
+                    color: *colors.get(idx).unwrap_or(&Color::White),
+                    palette: Palette::Original,
+                    samples: Vec::new(),
+                    xy_points: Vec::new(),
+                    peak_levels: Vec::new(),
+                    max_frequency: 0.0,
+                });
+            }
+            let samples = &mut series[idx].samples;
+            samples.clear();
+            samples.extend_from_slice(&row[row.len().saturating_sub(cfg.width)..]);
+        }
     }
 }
 

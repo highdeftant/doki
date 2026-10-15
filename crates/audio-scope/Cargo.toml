@@ -11,6 +11,7 @@ ratatui = "0.29"
 rustfft = { version = "6", optional = true }
 cpal = { version = "0.15", optional = true }
 scope-core = { path = "../scope-core" }
+serde_json = "1.0"
 
 [features]
 default = ["audio"]
