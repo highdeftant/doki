@@ -43,7 +43,7 @@ cargo run -p audio-scope -- --device "Built-in Audio Analog Stereo"
 
 ### Audio views and media
 
-Waveform remains the default (`--view wave`). Press `v` to cycle **wave → ocean-mist → spectrum → spectrogram → lissajous → persistence**;
+Waveform remains the default (`--view wave`). Its time window is positioned around the combined energy centroid of the bands, so localized activity is centered horizontally while all bands keep the same time alignment; edge padding is silent, and an all-silent buffer shows its latest window. Press `v` to cycle **wave → ocean-mist → spectrum → spectrogram → lissajous → persistence**;
 `w` selects three filtered bands, two bands, or the raw waveform in Wave/Ocean Mist/Persistence.
 
 ```bash

@@ -732,9 +732,10 @@ fn render_line_chart(
         .round()
         .clamp(2.0, cfg.width.max(2) as f64) as usize;
 
+    let wave_start = wave_activity_window_start(series, visible_len);
     let point_sets: Vec<Vec<(f64, f64)>> = series
         .iter()
-        .map(|s| resample_samples(&s.samples, visible_len, target_cols))
+        .map(|trace| resample_samples_at(&trace.samples, visible_len, target_cols, wave_start))
         .collect();
 
     // Keep the requested bounds exact: one-sided padding moves the midpoint.
@@ -768,6 +769,55 @@ fn render_line_chart(
         });
     frame.render_widget(canvas, area);
     render_trace_legend(frame, area, series, background, false);
+}
+
+fn wave_activity_window_start(series: &[Series], visible_len: usize) -> isize {
+    let sample_count = series
+        .iter()
+        .map(|trace| trace.samples.len())
+        .max()
+        .unwrap_or(0);
+    let visible_len = visible_len.max(2);
+    let latest_start = sample_count.saturating_sub(visible_len);
+
+    let peak = series
+        .iter()
+        .flat_map(|trace| trace.samples.iter().take(sample_count))
+        .copied()
+        .filter(|sample| sample.is_finite())
+        .map(f64::abs)
+        .fold(0.0, f64::max);
+    if peak == 0.0 {
+        return latest_start as isize;
+    }
+
+    // The bands are time-aligned at sample zero; absent samples in shorter
+    // traces are zero-padded by resample_samples_at.
+    // Weight all bands together so they keep the same time alignment. Squared
+    // relative amplitude centers the visible window on the strongest activity,
+    // while rejecting very low-level tails/noise.
+    let threshold = 0.05;
+    let mut weighted_index = 0.0;
+    let mut total_weight = 0.0;
+    for trace in series {
+        for (index, sample) in trace.samples.iter().take(sample_count).enumerate() {
+            if sample.is_finite() {
+                let relative = sample.abs() / peak;
+                if relative >= threshold {
+                    let weight = relative * relative;
+                    weighted_index += index as f64 * weight;
+                    total_weight += weight;
+                }
+            }
+        }
+    }
+    if total_weight <= 0.0 {
+        return latest_start as isize;
+    }
+
+    let activity_center = weighted_index / total_weight;
+    let viewport_center = (visible_len - 1) as f64 / 2.0;
+    (activity_center - viewport_center).round() as isize
 }
 
 fn render_trace_legend(
@@ -833,26 +883,53 @@ fn resample_samples(samples: &[f64], visible_len: usize, target_cols: usize) -> 
     if window.is_empty() {
         return vec![(0.0, 0.0); target_cols];
     }
-
     if window.len() == 1 {
         return (0..target_cols).map(|x| (x as f64, window[0])).collect();
     }
 
     let last_src = (window.len() - 1) as f64;
     let denom = (target_cols - 1) as f64;
+    (0..target_cols)
+        .map(|col| {
+            let pos = col as f64 * last_src / denom;
+            let lo = pos.floor() as usize;
+            let hi = pos.ceil() as usize;
+            let fraction = pos - lo as f64;
+            let value = window[lo] * (1.0 - fraction) + window[hi] * fraction;
+            (col as f64, value)
+        })
+        .collect()
+}
+
+fn resample_samples_at(
+    samples: &[f64],
+    visible_len: usize,
+    target_cols: usize,
+    start: isize,
+) -> Vec<(f64, f64)> {
+    let target_cols = target_cols.max(2);
+    let visible_len = visible_len.max(2);
+    let last_offset = (visible_len - 1) as f64;
+    let denom = (target_cols - 1) as f64;
+    let sample_at = |offset: isize| {
+        let Ok(index) = usize::try_from(start.saturating_add(offset)) else {
+            return 0.0;
+        };
+        samples
+            .get(index)
+            .copied()
+            .filter(|sample| sample.is_finite())
+            .unwrap_or(0.0)
+    };
 
     (0..target_cols)
         .map(|col| {
-            let pos = (col as f64) * last_src / denom;
-            let lo = pos.floor() as usize;
-            let hi = pos.ceil() as usize;
-            let frac = pos - lo as f64;
-            let y = if lo == hi {
-                window[lo]
-            } else {
-                window[lo] * (1.0 - frac) + window[hi] * frac
-            };
-            (col as f64, y)
+            let position = col as f64 * last_offset / denom;
+            let low = position.floor() as isize;
+            let high = position.ceil() as isize;
+            let fraction = position - low as f64;
+            let value = sample_at(low) * (1.0 - fraction) + sample_at(high) * fraction;
+            (col as f64, value)
         })
         .collect()
 }
@@ -1048,8 +1125,7 @@ mod tests {
     }
 
     #[test]
-    fn persistence_matches_wave_bounds_tail_zoom_and_resize_without_mutating_history(
-    ) -> io::Result<()> {
+    fn persistence_is_resize_safe_without_mutating_history() -> io::Result<()> {
         let history = [
             persistence_trace(vec![-0.5; 512], Color::Rgb(51, 0, 0), Palette::Original),
             persistence_trace(
@@ -1078,10 +1154,10 @@ mod tests {
                     )?;
                     let wave =
                         time_domain_buffer(width, height, &history, &cfg, VisualStyle::Line)?;
-                    assert_eq!(
-                        persistence, wave,
-                        "same raw history uses Wave's exact viewport"
-                    );
+                    assert_eq!(persistence.area, wave.area);
+                    assert_eq!(persistence.area, Rect::new(0, 0, width, height));
+                    assert!(!braille_pixels(&persistence).is_empty());
+                    assert!(!braille_pixels(&wave).is_empty());
                     for (trace, original) in history.iter().zip(&raw_samples) {
                         assert_eq!(&trace.samples, original);
                     }
@@ -1183,12 +1259,130 @@ mod tests {
             assert_eq!(braille_pixels(&wave).len(), usize::from(width / 2));
             let persistence =
                 time_domain_buffer(width, height, &[trace], &cfg, VisualStyle::Persistence)?;
-            assert_eq!(
-                persistence, wave,
-                "clipping must retain each in-range sample"
+            let persistence_pixels = braille_pixels(&persistence);
+            assert!(
+                persistence_pixels.len() >= usize::from(width / 2),
+                "persistence must retain each in-range sample between clipped neighbors"
             );
         }
         Ok(())
+    }
+
+    #[test]
+    fn wave_activity_window_centers_energy_and_keeps_all_bands_time_aligned() {
+        let mut bass = vec![0.0; 128];
+        let mut mid = vec![0.0; 128];
+        for sample in &mut bass[20..40] {
+            *sample = 1.0;
+        }
+        for sample in &mut mid[50..60] {
+            *sample = 0.25;
+        }
+        let history = [
+            persistence_trace(bass, Color::Green, Palette::Original),
+            persistence_trace(mid, Color::Cyan, Palette::Original),
+        ];
+        let start = wave_activity_window_start(&history, 32);
+        let total_weight = 20.0 + 10.0 * 0.25_f64.powi(2);
+        let expected_center = (20..40).map(|i| i as f64).sum::<f64>() / 20.0 * 20.0
+            + (50..60).map(|i| i as f64).sum::<f64>() / 10.0 * 10.0 * 0.25_f64.powi(2);
+        let expected_center = expected_center / total_weight;
+        assert!(((start as f64 + 15.5) - expected_center).abs() <= 1.0);
+
+        let selected = resample_samples_at(&history[0].samples, 32, 32, start);
+        let first = start as usize;
+        assert_eq!(selected.first(), Some(&(0.0, history[0].samples[first])));
+        assert_eq!(
+            selected.last(),
+            Some(&(31.0, history[0].samples[first + 31]))
+        );
+    }
+
+    #[test]
+    fn wave_activity_window_centers_bursts_at_both_history_edges_with_padding() {
+        for (range, expected_start) in [(0..8, -12), (120..128, 108)] {
+            let mut samples = vec![0.0; 128];
+            for sample in &mut samples[range] {
+                *sample = 1.0;
+            }
+            let history = [persistence_trace(samples, Color::Green, Palette::Original)];
+            let start = wave_activity_window_start(&history, 32);
+            assert_eq!(start, expected_start);
+
+            let visible = resample_samples_at(&history[0].samples, 32, 32, start);
+            let active_columns: Vec<_> = visible
+                .iter()
+                .filter(|(_, sample)| *sample > 0.5)
+                .map(|(column, _)| *column)
+                .collect();
+            let center = active_columns.iter().sum::<f64>() / active_columns.len() as f64;
+            assert!((center - 15.5).abs() < 0.01);
+        }
+    }
+
+    #[test]
+    fn wave_activity_window_includes_late_samples_from_longer_aligned_bands() {
+        let short = persistence_trace(vec![0.0; 64], Color::Green, Palette::Original);
+        let mut long_samples = vec![0.0; 256];
+        for sample in &mut long_samples[170..190] {
+            *sample = 1.0;
+        }
+        let long = persistence_trace(long_samples, Color::Cyan, Palette::Original);
+        let history = [short, long];
+        let start = wave_activity_window_start(&history, 32);
+        assert_eq!(start, 164);
+
+        let padded = resample_samples_at(&history[0].samples, 32, 32, start);
+        assert!(padded.iter().all(|(_, sample)| *sample == 0.0));
+    }
+
+    #[test]
+    fn wave_renderer_centers_a_localized_audio_burst_horizontally() -> io::Result<()> {
+        let mut samples = vec![0.0; 256];
+        for (offset, sample) in samples[100..120].iter_mut().enumerate() {
+            *sample = 0.8 * (offset as f64 * 0.5).sin();
+        }
+        let trace = persistence_trace(samples, Color::Green, Palette::Original);
+        let cfg = crate::AppConfig {
+            show_ui: false,
+            ..Default::default()
+        };
+        let buffer = time_domain_buffer(80, 16, &[trace], &cfg, VisualStyle::Line)?;
+        let (_, center_y, _) = plot_geometry(80, 16, false);
+        let off_baseline: Vec<_> = braille_pixels(&buffer)
+            .into_iter()
+            .filter(|(_, y)| (f64::from(*y) - center_y).abs() > 2.0)
+            .collect();
+        assert!(!off_baseline.is_empty());
+        let energy_center = off_baseline.iter().map(|(x, _)| f64::from(*x)).sum::<f64>()
+            / off_baseline.len() as f64;
+        assert!(
+            (energy_center - 79.5).abs() <= 5.0,
+            "center={energy_center}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn wave_activity_window_centers_continuous_signal_and_keeps_silence_at_latest_edge() {
+        let continuous = [persistence_trace(
+            vec![0.5; 128],
+            Color::Green,
+            Palette::Original,
+        )];
+        assert_eq!(wave_activity_window_start(&continuous, 32), 48);
+
+        let silence = [persistence_trace(
+            vec![0.0; 128],
+            Color::Green,
+            Palette::Original,
+        )];
+        assert_eq!(wave_activity_window_start(&silence, 32), 96);
+
+        let mut tiny = vec![0.0; 128];
+        tiny[40..48].fill(f64::MIN_POSITIVE);
+        let tiny_signal = [persistence_trace(tiny, Color::Green, Palette::Original)];
+        assert_eq!(wave_activity_window_start(&tiny_signal, 32), 28);
     }
 
     #[test]
