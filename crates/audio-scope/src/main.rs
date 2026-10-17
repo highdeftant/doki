@@ -56,9 +56,9 @@ const DEFAULT_PERSISTENCE_WINDOW: usize = 12;
 const MAX_PERSISTENCE_WINDOW: usize = 120;
 
 #[cfg(feature = "audio")]
-/// Roughly three frames at the default 32 ms render period: enough separation
-/// to reduce trail noise without making Persistence feel sluggish.
-const PERSISTENCE_CAPTURE_INTERVAL: std::time::Duration = std::time::Duration::from_millis(80);
+/// About six frames at the default 32 ms render period: enough separation to
+/// reduce trail noise without making Persistence feel sluggish.
+const PERSISTENCE_CAPTURE_INTERVAL: std::time::Duration = std::time::Duration::from_millis(180);
 
 #[cfg(feature = "audio")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
@@ -784,6 +784,8 @@ fn smoke(theme: Theme, persistence_window: u16) -> anyhow::Result<()> {
     renderer.media_line = media::query_once();
     println!("MPRIS: {}", renderer.media_line);
     let mut terminal = Terminal::new(TestBackend::new(96, 18))?;
+    let persistence_ticks_per_capture = 6;
+    let persistence_tick = PERSISTENCE_CAPTURE_INTERVAL / persistence_ticks_per_capture as u32;
     let mut series = Vec::new();
     for (view, wave_count) in [
         (View::Wave, 1),
@@ -802,7 +804,7 @@ fn smoke(theme: Theme, persistence_window: u16) -> anyhow::Result<()> {
         renderer.view = view;
         renderer.wave_count = wave_count;
         let ticks = if view == View::Persistence {
-            renderer.persistence_window * 2 + 2
+            renderer.persistence_window * persistence_ticks_per_capture + 2
         } else {
             16
         };
@@ -813,6 +815,7 @@ fn smoke(theme: Theme, persistence_window: u16) -> anyhow::Result<()> {
                 .fold(0u64, |hash, sample| hash.rotate_left(7) ^ sample.to_bits())
         };
         for tick in 0..ticks {
+            let elapsed = std::time::Duration::from_secs(12) + persistence_tick * tick as u32;
             let amplitude = if tick < 8 { 0.5 } else { 0.2 };
             let left: Vec<_> = (0..1024)
                 .map(|i| {
@@ -834,19 +837,15 @@ fn smoke(theme: Theme, persistence_window: u16) -> anyhow::Result<()> {
             } else {
                 vec![left]
             };
-            renderer.process_at(
-                &cfg,
-                &frame,
-                &mut series,
-                std::time::Duration::from_secs_f64(12.0 + tick as f64 * 0.04),
-            );
+            renderer.process_at(&cfg, &frame, &mut series, elapsed);
             if view == View::Persistence {
-                let frames = (tick / 2 + 1).min(renderer.persistence_window);
+                let frames =
+                    (tick / persistence_ticks_per_capture + 1).min(renderer.persistence_window);
                 anyhow::ensure!(
                     series.len() == frames * wave_count,
                     "persistence history length"
                 );
-                if tick > 0 && tick.is_multiple_of(2) {
+                if tick > 0 && tick.is_multiple_of(persistence_ticks_per_capture) {
                     let prior = series.len() - 2 * wave_count;
                     for (band, expected) in series[prior..prior + wave_count]
                         .iter()
@@ -875,9 +874,7 @@ fn smoke(theme: Theme, persistence_window: u16) -> anyhow::Result<()> {
                         Color::Rgb(128, 128, 128),
                         Color::Rgb(255, 255, 255),
                     ],
-                    Theme::Rgb => theme.colors(std::time::Duration::from_secs_f64(
-                        12.0 + tick as f64 * 0.04,
-                    )),
+                    Theme::Rgb => theme.colors(elapsed),
                 };
                 for (index, band) in series.iter().enumerate() {
                     let age = index / wave_count;
@@ -1051,6 +1048,10 @@ mod tests {
         std::time::Duration::from_millis(millis)
     }
 
+    fn capture_at(index: u32) -> std::time::Duration {
+        PERSISTENCE_CAPTURE_INTERVAL * index
+    }
+
     #[test]
     fn persistence_evicts_chronologically_and_fades_oldest_to_newest() {
         let cfg = AppConfig {
@@ -1068,7 +1069,7 @@ mod tests {
                     &cfg,
                     &vec![vec![value; 8]],
                     &mut series,
-                    at_ms((tick - 1) as u64 * 80),
+                    capture_at((tick - 1) as u32),
                 );
                 let frames = tick.min(window);
                 assert_eq!(series.len(), frames);
@@ -1100,28 +1101,36 @@ mod tests {
         renderer.set_persistence_window(3);
         let mut series = Vec::new();
 
-        for (millis, value, expected) in [
-            (0, 0.1, vec![0.1]),
-            (32, 0.2, vec![0.2]),
-            (79, 0.3, vec![0.3]),
-            (80, 0.4, vec![0.3, 0.4]),
-            (111, 0.5, vec![0.3, 0.5]),
-            (159, 0.6, vec![0.3, 0.6]),
-            (160, 0.7, vec![0.3, 0.6, 0.7]),
+        for (elapsed, value, expected) in [
+            (std::time::Duration::ZERO, 0.1, vec![0.1]),
+            (at_ms(32), 0.2, vec![0.2]),
+            (capture_at(1) - at_ms(1), 0.3, vec![0.3]),
+            (capture_at(1), 0.4, vec![0.3, 0.4]),
+            (capture_at(1) + at_ms(31), 0.5, vec![0.3, 0.5]),
+            (capture_at(2) - at_ms(1), 0.6, vec![0.3, 0.6]),
+            (capture_at(2), 0.7, vec![0.3, 0.6, 0.7]),
             // Injected time moved backwards: update the live trace and restart
-            // the 80 ms interval without promoting it early.
-            (10, 0.8, vec![0.3, 0.6, 0.8]),
-            (89, 0.9, vec![0.3, 0.6, 0.9]),
-            (90, 1.0, vec![0.6, 0.9, 1.0]),
+            // the capture interval without promoting it early.
+            (at_ms(10), 0.8, vec![0.3, 0.6, 0.8]),
+            (
+                at_ms(10) + PERSISTENCE_CAPTURE_INTERVAL - at_ms(1),
+                0.9,
+                vec![0.3, 0.6, 0.9],
+            ),
+            (
+                at_ms(10) + PERSISTENCE_CAPTURE_INTERVAL,
+                1.0,
+                vec![0.6, 0.9, 1.0],
+            ),
         ] {
-            renderer.process_at(&cfg, &vec![vec![value; 4]], &mut series, at_ms(millis));
+            renderer.process_at(&cfg, &vec![vec![value; 4]], &mut series, elapsed);
             assert_eq!(
                 series
                     .iter()
                     .map(|band| band.samples[0])
                     .collect::<Vec<_>>(),
                 expected,
-                "unexpected history at {millis} ms"
+                "unexpected history at {elapsed:?}"
             );
         }
     }
@@ -1156,11 +1165,11 @@ mod tests {
                 &cfg,
                 &vec![vec![tick as f64 / 10.0; 4]],
                 &mut series,
-                at_ms((tick - 1) as u64 * 80),
+                capture_at((tick - 1) as u32),
             );
         }
         renderer.set_persistence_window(2);
-        renderer.process_at(&cfg, &vec![vec![0.6; 4]], &mut series, at_ms(400));
+        renderer.process_at(&cfg, &vec![vec![0.6; 4]], &mut series, capture_at(5));
         assert_eq!(
             series
                 .iter()
@@ -1169,8 +1178,13 @@ mod tests {
             [0.5, 0.6]
         );
         renderer.set_persistence_window(4);
-        for (millis, value) in [(480, 0.7), (560, 0.8)] {
-            renderer.process_at(&cfg, &vec![vec![value; 4]], &mut series, at_ms(millis));
+        for (capture, value) in [(6, 0.7), (7, 0.8)] {
+            renderer.process_at(
+                &cfg,
+                &vec![vec![value; 4]],
+                &mut series,
+                capture_at(capture),
+            );
         }
         assert_eq!(
             series
@@ -1181,7 +1195,7 @@ mod tests {
         );
         // A viewport-width change must not discard raw samples in retained frames.
         cfg.width = 2;
-        renderer.process_at(&cfg, &vec![vec![0.9; 4]], &mut series, at_ms(640));
+        renderer.process_at(&cfg, &vec![vec![0.9; 4]], &mut series, capture_at(8));
         assert_eq!(series[0].samples, [0.6; 4]);
         assert_eq!(series[3].samples, [0.9; 2]);
         for (key, expected) in [('{', 1), ('}', 120)] {
@@ -1208,14 +1222,21 @@ mod tests {
         let mut reference = AudioRenderer::new(44_100, Theme::Rgb, View::Wave, None);
         let mut series = Vec::new();
         let mut reference_series = Vec::new();
-        let mut elapsed = 0;
+        let mut elapsed = std::time::Duration::ZERO;
         for count in [1, 2, 3, 2, 1, 3] {
             renderer.wave_count = count;
             reference.wave_count = count;
             let mut prior = Vec::new();
-            for (tick, offset) in [0, 32, 80].into_iter().enumerate() {
+            for (tick, offset) in [
+                std::time::Duration::ZERO,
+                at_ms(32),
+                PERSISTENCE_CAPTURE_INTERVAL,
+            ]
+            .into_iter()
+            .enumerate()
+            {
                 let frame = tone(220.0 + tick as f64 * 1000.0);
-                let now = at_ms(elapsed + offset);
+                let now = elapsed + offset;
                 renderer.process_at(&cfg, &frame, &mut series, now);
                 reference.process_at(&cfg, &frame, &mut reference_series, now);
                 assert_eq!(series.len(), if tick < 2 { count } else { 2 * count });
@@ -1236,7 +1257,7 @@ mod tests {
                     .map(|band| band.samples.clone())
                     .collect::<Vec<_>>();
             }
-            elapsed += 160;
+            elapsed += PERSISTENCE_CAPTURE_INTERVAL * 2;
         }
     }
 
@@ -1252,11 +1273,11 @@ mod tests {
             renderer.set_persistence_window(3);
             let mut series = Vec::new();
             let silence = vec![vec![0.0; 512]];
-            renderer.process_at(&cfg, &tone(1000.0), &mut series, at_ms(0));
+            renderer.process_at(&cfg, &tone(1000.0), &mut series, std::time::Duration::ZERO);
             assert!(series
                 .iter()
                 .any(|band| band.samples.iter().any(|&sample| sample != 0.0)));
-            renderer.process_at(&cfg, &silence, &mut series, at_ms(80));
+            renderer.process_at(&cfg, &silence, &mut series, capture_at(1));
             assert_eq!(series.len(), 2 * count);
             assert!(series[..count]
                 .iter()
@@ -1264,8 +1285,8 @@ mod tests {
             assert!(series[count..]
                 .iter()
                 .all(|band| band.samples.iter().all(|&sample| sample == 0.0)));
-            for millis in [160, 240] {
-                renderer.process_at(&cfg, &silence, &mut series, at_ms(millis));
+            for capture in [2, 3] {
+                renderer.process_at(&cfg, &silence, &mut series, capture_at(capture));
             }
             assert_eq!(series.len(), 3 * count);
             assert!(series.iter().all(|band| band.samples.len() == 512
@@ -1279,20 +1300,26 @@ mod tests {
             .into_iter()
             .enumerate()
             {
-                let elapsed = 320 + index as u64 * 160;
-                renderer.process_at(&cfg, &tone(1000.0), &mut series, at_ms(elapsed));
-                renderer.process_at(&cfg, &invalid, &mut series, at_ms(elapsed + 1));
+                let elapsed = capture_at(4 + index as u32 * 2);
+                renderer.process_at(&cfg, &tone(1000.0), &mut series, elapsed);
+                renderer.process_at(&cfg, &invalid, &mut series, elapsed + at_ms(1));
                 assert!(series.is_empty(), "invalid downmix retained trails");
                 assert_eq!(
                     (renderer.peak, renderer.rms, renderer.clip_pct),
                     (0.0, 0.0, 0.0)
                 );
-                renderer.process_at(&cfg, &silence, &mut series, at_ms(0));
-                renderer.process_at(&cfg, &silence, &mut series, at_ms(79));
+                renderer.process_at(&cfg, &silence, &mut series, std::time::Duration::ZERO);
+                renderer.process_at(
+                    &cfg,
+                    &silence,
+                    &mut series,
+                    PERSISTENCE_CAPTURE_INTERVAL - at_ms(1),
+                );
                 assert_eq!(series.len(), count, "invalid input did not reset cadence");
-                renderer.process_at(&cfg, &silence, &mut series, at_ms(80));
+                renderer.process_at(&cfg, &silence, &mut series, capture_at(1));
                 assert_eq!(series.len(), 2 * count);
-                for (band, expected) in series[count..].iter().zip(Theme::Rgb.colors(at_ms(80))) {
+                for (band, expected) in series[count..].iter().zip(Theme::Rgb.colors(capture_at(1)))
+                {
                     assert_eq!(band.color, expected);
                 }
             }
@@ -1308,21 +1335,27 @@ mod tests {
         let mut renderer = AudioRenderer::new(44_100, Theme::Rgb, View::Persistence, None);
         renderer.wave_count = 1;
         let mut series = Vec::new();
-        renderer.process_at(&cfg, &vec![vec![0.1; 8]], &mut series, at_ms(0));
-        renderer.process_at(&cfg, &vec![vec![0.2; 8]], &mut series, at_ms(80));
+        renderer.process_at(
+            &cfg,
+            &vec![vec![0.1; 8]],
+            &mut series,
+            std::time::Duration::ZERO,
+        );
+        renderer.process_at(&cfg, &vec![vec![0.2; 8]], &mut series, capture_at(1));
         assert_eq!(series.len(), 2);
 
         renderer.view = View::Wave;
-        renderer.process_at(&cfg, &vec![vec![0.3; 8]], &mut series, at_ms(160));
+        renderer.process_at(&cfg, &vec![vec![0.3; 8]], &mut series, capture_at(2));
         assert_eq!(series.len(), 1);
 
         renderer.view = View::Persistence;
-        renderer.process_at(&cfg, &vec![vec![0.3; 8]], &mut series, at_ms(240));
-        renderer.process_at(&cfg, &vec![vec![0.4; 8]], &mut series, at_ms(319));
+        renderer.process_at(&cfg, &vec![vec![0.3; 8]], &mut series, capture_at(3));
+        let before_capture = capture_at(4) - at_ms(1);
+        renderer.process_at(&cfg, &vec![vec![0.4; 8]], &mut series, before_capture);
         assert_eq!(series.len(), 1);
         assert_eq!(series[0].samples, [0.4; 8]);
-        assert_eq!(series[0].color, Theme::Rgb.colors(at_ms(319))[0]);
-        renderer.process_at(&cfg, &vec![vec![0.5; 8]], &mut series, at_ms(320));
+        assert_eq!(series[0].color, Theme::Rgb.colors(before_capture)[0]);
+        renderer.process_at(&cfg, &vec![vec![0.5; 8]], &mut series, capture_at(4));
         assert_eq!(series.len(), 2);
         assert_eq!(series[0].samples, [0.4; 8]);
         assert_eq!(series[1].samples, [0.5; 8]);
@@ -1338,7 +1371,7 @@ mod tests {
         let mut series = Vec::new();
         renderer.process_at(&cfg, &tone(1000.0), &mut series, std::time::Duration::ZERO);
         let original: Vec<_> = series.iter().map(|band| band.samples.clone()).collect();
-        renderer.process_at(&cfg, &tone(2000.0), &mut series, at_ms(80));
+        renderer.process_at(&cfg, &tone(2000.0), &mut series, capture_at(1));
         for (theme, millis, base) in [
             (
                 Theme::Mono,
