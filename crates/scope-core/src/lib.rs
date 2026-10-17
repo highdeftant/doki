@@ -6,6 +6,12 @@ pub type Matrix = Vec<Vec<f64>>;
 pub type SourceFrame = Matrix;
 
 const VIEW_PRESETS: [(f64, f64); 3] = [(1.0, 4.0), (1.5, 2.0), (0.75, 8.0)];
+const LISSAJOUS_ROTATION_PERIOD: Duration = Duration::from_secs(60);
+
+fn lissajous_rotation(elapsed: Duration) -> f64 {
+    let period = LISSAJOUS_ROTATION_PERIOD.as_secs_f64();
+    std::f64::consts::TAU * (elapsed.as_secs_f64() % period) / period
+}
 
 pub trait DataSource {
     fn next_frame(&mut self) -> io::Result<Option<SourceFrame>>;
@@ -23,6 +29,8 @@ pub struct AppConfig {
     pub sleep_ms: u64,
     /// Physical text-cell width / height; half-width cells are the fallback.
     pub cell_aspect: f64,
+    /// Display-only stereo plot rotation, in radians.
+    pub lissajous_rotation: f64,
 }
 
 impl Default for AppConfig {
@@ -37,6 +45,7 @@ impl Default for AppConfig {
             view_preset: 0,
             sleep_ms: 16,
             cell_aspect: 0.5,
+            lissajous_rotation: 0.0,
         }
     }
 }
@@ -176,6 +185,10 @@ pub fn run_app<S: DataSource, R: Renderer>(
                     redraw_pending = true;
                 }
             }
+            if matches!(renderer.visual_style(), VisualStyle::Lissajous) {
+                cfg.lissajous_rotation = lissajous_rotation(epoch.elapsed());
+                redraw_pending = true;
+            }
         }
 
         if redraw_pending {
@@ -262,7 +275,7 @@ pub use render::Series;
 
 #[cfg(test)]
 mod tests {
-    use super::{cell_aspect, event_invalidates_frame, AppConfig, FramePacer};
+    use super::{cell_aspect, event_invalidates_frame, lissajous_rotation, AppConfig, FramePacer};
     use std::time::Duration;
 
     #[test]
@@ -346,6 +359,25 @@ mod tests {
         assert_eq!(pacer.time_until_frame(deadline), Duration::from_millis(32));
         assert!(!pacer.claim_frame(Duration::from_millis(63)));
         assert!(pacer.claim_frame(Duration::from_millis(64)));
+    }
+
+    #[test]
+    fn lissajous_rotation_is_time_based_and_wraps_once_per_minute() {
+        assert_eq!(lissajous_rotation(Duration::ZERO), 0.0);
+        assert!(
+            (lissajous_rotation(Duration::from_secs(15)) - std::f64::consts::FRAC_PI_2).abs()
+                < 1e-12
+        );
+        assert!((lissajous_rotation(Duration::from_secs(30)) - std::f64::consts::PI).abs() < 1e-12);
+        assert!(
+            (lissajous_rotation(Duration::from_secs(45)) - 3.0 * std::f64::consts::FRAC_PI_2).abs()
+                < 1e-12
+        );
+        assert_eq!(lissajous_rotation(Duration::from_secs(60)), 0.0);
+        assert_eq!(
+            lissajous_rotation(Duration::from_secs(75)),
+            lissajous_rotation(Duration::from_secs(15))
+        );
     }
 
     #[test]

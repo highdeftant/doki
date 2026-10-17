@@ -43,7 +43,11 @@ cargo run -p audio-scope -- --device "Built-in Audio Analog Stereo"
 
 ### Audio views and media
 
-Waveform remains the default (`--view wave`). Its time window is positioned around the combined energy centroid of the bands, so localized activity is centered horizontally while all bands keep the same time alignment; edge padding is silent, and an all-silent buffer shows its latest window. Press `v` to cycle **wave → ocean-mist → spectrum → spectrogram → lissajous → persistence**;
+Waveform remains the default (`--view wave`). Its time window follows the combined energy
+centroid, centering localized activity horizontally while keeping all bands time-aligned.
+At history edges it clamps to captured samples instead of inserting silent padding; in
+silence it shows the latest window. Press `v` to cycle **wave → ocean-mist → spectrum →
+spectrogram → lissajous → persistence**;
 `w` selects three filtered bands, two bands, or the raw waveform in Wave/Ocean Mist/Persistence.
 
 ```bash
@@ -243,5 +247,6 @@ incoming samples and returns empty channel windows, without synthetic startup da
 
 Wave, Ocean Mist, spectrum, and spectrogram intentionally downmix complete channel
 frames as `clamp(sum(channels) / channel_count, -1, 1)` before their existing DSP,
-using reusable scratch. Lissajous bypasses that destructive mix. A mono source
-cannot provide stereo X–Y; use a real stereo playback monitor or two-channel input.
+using reusable scratch. Lissajous bypasses that destructive mix and applies a display-only
+rotation of one turn per 60 seconds; it still plots only measured left/right pairs. A mono
+source cannot provide stereo X–Y; use a real stereo playback monitor or two-channel input.

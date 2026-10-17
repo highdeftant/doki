@@ -511,7 +511,7 @@ impl AudioRenderer {
                 if trace.xy_points.is_empty() {
                     "Awaiting stereo samples"
                 } else {
-                    "X: left / Y: right"
+                    "Stereo L/R | rotating display"
                 }
             }
             [_] => "Stereo X-Y unavailable: mono capture",
@@ -530,7 +530,7 @@ impl Renderer for AudioRenderer {
     fn header(&self) -> String {
         if self.view == View::Lissajous {
             return format!(
-                "{}\ntheme {} | bg {} | view lissajous | X left / Y right",
+                "{}\ntheme {} | bg {} | view lissajous | stereo L/R | 60 s rotation",
                 self.media_line,
                 self.theme.title(),
                 self.background_name(),

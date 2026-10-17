@@ -176,7 +176,7 @@ fn render_help_popup(frame: &mut Frame, background: Color) {
             Line::from("b                  terminal / black / midnight"),
             Line::from("RGB                one hue / 45 seconds"),
             Line::from("ocean-mist          dotted wave layers"),
-            Line::from("lissajous          raw stereo: L → x / R → y"),
+            Line::from("lissajous          stereo L/R plot, 60 s display rotation"),
             Line::from("persistence        fading time-domain history"),
             Line::from("{ / }              history frames - / + (1..120)"),
             Line::from("spectrum           fractional bars + peak hold"),
@@ -244,6 +244,10 @@ fn trace_color(series: &Series, brightness: f64, ghost: bool) -> Color {
     }
 }
 
+fn rotate_lissajous_point(left: f64, right: f64, sin: f64, cos: f64) -> (f64, f64) {
+    (left * cos - right * sin, left * sin + right * cos)
+}
+
 fn render_lissajous(
     frame: &mut Frame,
     area: Rect,
@@ -288,12 +292,19 @@ fn render_lissajous(
         .y_bounds([-y_limit, y_limit])
         .marker(Marker::Braille)
         .paint(|ctx| {
+            let angle = if cfg.lissajous_rotation.is_finite() {
+                cfg.lissajous_rotation
+            } else {
+                0.0
+            };
+            let (sin, cos) = angle.sin_cos();
             let mut painter = Painter::from(&mut *ctx);
-            // Plot only measured pairs: no temporal resampling, connecting
-            // segments, per-channel normalization, or scalar fallback.
+            // Rotate only the display coordinates; each plotted pair still comes
+            // from the measured left/right samples, with no channel synthesis.
             for &(left, right) in &trace.xy_points {
                 if left.is_finite() && right.is_finite() {
-                    if let Some((x, y)) = painter.get_point(left, right) {
+                    let (x, y) = rotate_lissajous_point(left, right, sin, cos);
+                    if let Some((x, y)) = painter.get_point(x, y) {
                         painter.paint(x, y, trace.color);
                     }
                 }
@@ -771,7 +782,7 @@ fn render_line_chart(
     render_trace_legend(frame, area, series, background, false);
 }
 
-fn wave_activity_window_start(series: &[Series], visible_len: usize) -> isize {
+fn wave_activity_window_start(series: &[Series], visible_len: usize) -> usize {
     let sample_count = series
         .iter()
         .map(|trace| trace.samples.len())
@@ -788,11 +799,9 @@ fn wave_activity_window_start(series: &[Series], visible_len: usize) -> isize {
         .map(f64::abs)
         .fold(0.0, f64::max);
     if peak == 0.0 {
-        return latest_start as isize;
+        return latest_start;
     }
 
-    // The bands are time-aligned at sample zero; absent samples in shorter
-    // traces are zero-padded by resample_samples_at.
     // Weight all bands together so they keep the same time alignment. Squared
     // relative amplitude centers the visible window on the strongest activity,
     // while rejecting very low-level tails/noise.
@@ -812,12 +821,16 @@ fn wave_activity_window_start(series: &[Series], visible_len: usize) -> isize {
         }
     }
     if total_weight <= 0.0 {
-        return latest_start as isize;
+        return latest_start;
     }
 
     let activity_center = weighted_index / total_weight;
     let viewport_center = (visible_len - 1) as f64 / 2.0;
-    (activity_center - viewport_center).round() as isize
+    let requested_start = (activity_center - viewport_center).round();
+    // Never synthesize a silent tail at either edge. Clamp the shared viewport
+    // to available history; edge activity may be less centered, but the rendered
+    // endpoints always come from captured samples.
+    requested_start.clamp(0.0, latest_start as f64) as usize
 }
 
 fn render_trace_legend(
@@ -905,18 +918,18 @@ fn resample_samples_at(
     samples: &[f64],
     visible_len: usize,
     target_cols: usize,
-    start: isize,
+    start: usize,
 ) -> Vec<(f64, f64)> {
     let target_cols = target_cols.max(2);
     let visible_len = visible_len.max(2);
-    let last_offset = (visible_len - 1) as f64;
+    let start = start.min(samples.len().saturating_sub(visible_len));
+    let end = start.saturating_add(visible_len).min(samples.len());
+    let window = &samples[start..end];
+    let last_offset = window.len().saturating_sub(1) as f64;
     let denom = (target_cols - 1) as f64;
-    let sample_at = |offset: isize| {
-        let Ok(index) = usize::try_from(start.saturating_add(offset)) else {
-            return 0.0;
-        };
-        samples
-            .get(index)
+    let sample_at = |offset: usize| {
+        window
+            .get(offset)
             .copied()
             .filter(|sample| sample.is_finite())
             .unwrap_or(0.0)
@@ -925,8 +938,8 @@ fn resample_samples_at(
     (0..target_cols)
         .map(|col| {
             let position = col as f64 * last_offset / denom;
-            let low = position.floor() as isize;
-            let high = position.ceil() as isize;
+            let low = position.floor() as usize;
+            let high = position.ceil() as usize;
             let fraction = position - low as f64;
             let value = sample_at(low) * (1.0 - fraction) + sample_at(high) * fraction;
             (col as f64, value)
@@ -1299,8 +1312,8 @@ mod tests {
     }
 
     #[test]
-    fn wave_activity_window_centers_bursts_at_both_history_edges_with_padding() {
-        for (range, expected_start) in [(0..8, -12), (120..128, 108)] {
+    fn wave_activity_window_clamps_edge_bursts_without_zero_padding() {
+        for (range, expected_start, expected_center) in [(0..8, 0, 3.5), (120..128, 96, 27.5)] {
             let mut samples = vec![0.0; 128];
             for sample in &mut samples[range] {
                 *sample = 1.0;
@@ -1316,12 +1329,20 @@ mod tests {
                 .map(|(column, _)| *column)
                 .collect();
             let center = active_columns.iter().sum::<f64>() / active_columns.len() as f64;
-            assert!((center - 15.5).abs() < 0.01);
+            assert!((center - expected_center).abs() < 0.01);
+            assert_eq!(
+                visible.first().map(|(_, sample)| *sample),
+                Some(history[0].samples[start])
+            );
+            assert_eq!(
+                visible.last().map(|(_, sample)| *sample),
+                Some(history[0].samples[start + 31])
+            );
         }
     }
 
     #[test]
-    fn wave_activity_window_includes_late_samples_from_longer_aligned_bands() {
+    fn wave_activity_window_handles_a_longer_aligned_band_without_overrunning_shorter_data() {
         let short = persistence_trace(vec![0.0; 64], Color::Green, Palette::Original);
         let mut long_samples = vec![0.0; 256];
         for sample in &mut long_samples[170..190] {
@@ -1332,14 +1353,16 @@ mod tests {
         let start = wave_activity_window_start(&history, 32);
         assert_eq!(start, 164);
 
-        let padded = resample_samples_at(&history[0].samples, 32, 32, start);
-        assert!(padded.iter().all(|(_, sample)| *sample == 0.0));
+        let short_window = resample_samples_at(&history[0].samples, 32, 32, start);
+        assert!(short_window.iter().all(|(_, sample)| *sample == 0.0));
+        let long_window = resample_samples_at(&history[1].samples, 32, 32, start);
+        assert!(long_window.iter().any(|(_, sample)| *sample > 0.5));
     }
 
     #[test]
     fn wave_renderer_centers_a_localized_audio_burst_horizontally() -> io::Result<()> {
-        let mut samples = vec![0.0; 256];
-        for (offset, sample) in samples[100..120].iter_mut().enumerate() {
+        let mut samples = vec![0.0; 512];
+        for (offset, sample) in samples[250..270].iter_mut().enumerate() {
             *sample = 0.8 * (offset as f64 * 0.5).sin();
         }
         let trace = persistence_trace(samples, Color::Green, Palette::Original);
@@ -1466,6 +1489,17 @@ mod tests {
             }
         }
         Ok(())
+    }
+
+    #[test]
+    fn lissajous_rotation_transforms_stereo_coordinates_without_synthesizing_channels() {
+        let (sin, cos) = std::f64::consts::FRAC_PI_2.sin_cos();
+        let (x, y) = rotate_lissajous_point(1.0, 0.0, sin, cos);
+        assert!(x.abs() < 1e-12);
+        assert!((y - 1.0).abs() < 1e-12);
+        let (x, y) = rotate_lissajous_point(0.0, -1.0, sin, cos);
+        assert!((x - 1.0).abs() < 1e-12);
+        assert!(y.abs() < 1e-12);
     }
 
     #[test]
