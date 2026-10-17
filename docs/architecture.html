@@ -1,0 +1,666 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Scope Studio — Framework Architecture</title>
+  <style>
+    :root {
+      --bg: #071014;
+      --panel: #0b171d;
+      --panel-2: #0f2028;
+      --line: #29424c;
+      --muted: #86a0aa;
+      --text: #e7f3f5;
+      --audio: #58e1c1;
+      --audio-soft: #143c38;
+      --network: #72a7ff;
+      --network-soft: #172d50;
+      --core: #f4bf61;
+      --core-soft: #4a3516;
+      --render: #d789ff;
+      --render-soft: #3b1e4a;
+      --output: #ff806f;
+      --output-soft: #4a211d;
+      --rail: min(92rem, calc(100% - 2rem));
+      --shadow: 0 30px 90px rgb(0 0 0 / .42);
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      min-width: 320px;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 50% -20%, #183541 0, transparent 42rem),
+        linear-gradient(180deg, #071014 0%, #050a0d 100%);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    button, a { font: inherit; }
+    .shell { width: var(--rail); margin-inline: auto; }
+
+    header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 2rem;
+      padding: 2.6rem 0 1.5rem;
+    }
+    .eyebrow {
+      margin: 0 0 .7rem;
+      color: var(--audio);
+      font: 700 .72rem/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+      letter-spacing: .16em;
+      text-transform: uppercase;
+    }
+    h1 {
+      margin: 0;
+      max-width: 48rem;
+      font-size: clamp(2rem, 4.4vw, 4rem);
+      line-height: .98;
+      letter-spacing: -.055em;
+    }
+    .lede {
+      max-width: 43rem;
+      margin: 1rem 0 0;
+      color: var(--muted);
+      font-size: 1rem;
+      line-height: 1.65;
+    }
+    .repo-stamp {
+      flex: 0 0 auto;
+      margin-top: .2rem;
+      padding: .7rem .85rem;
+      border: 1px solid var(--line);
+      border-radius: .65rem;
+      color: #b8cbd1;
+      background: rgb(11 23 29 / .82);
+      font: 600 .7rem/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+      box-shadow: inset 0 1px rgb(255 255 255 / .04);
+    }
+
+    .toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      margin-bottom: .8rem;
+    }
+    .filters, .legend { display: flex; flex-wrap: wrap; gap: .5rem; }
+    .filter {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: .48rem .8rem;
+      color: var(--muted);
+      background: #0b171d;
+      cursor: pointer;
+      transition: .2s ease;
+    }
+    .filter:hover, .filter:focus-visible { color: var(--text); border-color: #57717b; outline: none; }
+    .filter[aria-pressed="true"] { color: #071014; border-color: var(--audio); background: var(--audio); }
+    .key {
+      display: inline-flex;
+      align-items: center;
+      gap: .38rem;
+      color: var(--muted);
+      font-size: .73rem;
+    }
+    .key::before { content: ""; width: .52rem; height: .52rem; border-radius: 50%; background: var(--key); box-shadow: 0 0 12px var(--key); }
+
+    .instrument {
+      position: relative;
+      overflow: hidden;
+      border: 1px solid #29424c;
+      border-radius: 1.2rem;
+      background:
+        linear-gradient(90deg, rgb(255 255 255 / .018) 1px, transparent 1px) 0 0 / 24px 24px,
+        linear-gradient(rgb(255 255 255 / .018) 1px, transparent 1px) 0 0 / 24px 24px,
+        #081318;
+      box-shadow: var(--shadow), inset 0 1px rgb(255 255 255 / .06);
+    }
+    .instrument::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background: linear-gradient(115deg, rgb(255 255 255 / .045), transparent 20%, transparent 80%, rgb(255 255 255 / .02));
+    }
+    svg { display: block; width: 100%; height: auto; min-height: 34rem; }
+
+    .svg-kicker { fill: #78939d; font: 700 11px ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .14em; }
+    .svg-title { fill: #edf8fa; font: 700 18px Inter, system-ui, sans-serif; letter-spacing: -.02em; }
+    .svg-label { fill: #d7e6e9; font: 650 13px Inter, system-ui, sans-serif; }
+    .svg-small { fill: #8ca5ae; font: 500 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .svg-tiny { fill: #6f8992; font: 600 9px ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .08em; }
+    .svg-value { fill: #fff; font: 700 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+    .rack { fill: #0a171c; stroke: #36515b; stroke-width: 1.5; }
+    .rack-top { fill: #11242b; stroke: #36515b; }
+    .bay { fill: #0c1b21; stroke: #29434d; stroke-width: 1.2; }
+    .bay-audio { fill: var(--audio-soft); stroke: #2d7467; }
+    .bay-network { fill: var(--network-soft); stroke: #395f9b; }
+    .bay-core { fill: #241d10; stroke: #80602b; }
+    .bay-render { fill: var(--render-soft); stroke: #784894; }
+    .bay-output { fill: var(--output-soft); stroke: #975044; }
+    .slot { fill: #071014; stroke: #243b44; }
+    .screw { fill: #607984; stroke: #0a1114; stroke-width: 1; }
+    .vent { stroke: #294049; stroke-width: 2; stroke-linecap: round; }
+    .led { filter: drop-shadow(0 0 5px currentColor); }
+    .node { cursor: pointer; transition: opacity .22s ease, filter .22s ease; }
+    .node:hover, .node:focus { filter: brightness(1.22) drop-shadow(0 0 9px rgb(112 225 197 / .14)); outline: none; }
+    .node.is-dim { opacity: .16; }
+    .node.is-active { filter: brightness(1.22) drop-shadow(0 0 10px rgb(112 225 197 / .28)); }
+
+    .cable {
+      fill: none;
+      stroke: #55717b;
+      stroke-width: 3;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      opacity: .76;
+      transition: opacity .2s ease, stroke .2s ease;
+    }
+    .cable.audio { stroke: var(--audio); }
+    .cable.network { stroke: var(--network); }
+    .cable.control { stroke: var(--core); stroke-dasharray: 4 7; }
+    .cable.output { stroke: var(--render); }
+    .cable.reference { stroke: #70838a; stroke-width: 1.6; stroke-dasharray: 5 7; }
+    .cable.is-dim { opacity: .08; }
+    .pulse { stroke-dasharray: 3 15; animation: travel 1.4s linear infinite; }
+    .network.pulse { animation-duration: 1.9s; }
+    .output.pulse { animation-duration: 1.1s; }
+    @keyframes travel { to { stroke-dashoffset: -36; } }
+
+    .meter-bg { fill: #061014; stroke: #2b444d; }
+    .meter-fill-audio { fill: var(--audio); opacity: .75; }
+    .meter-fill-network { fill: var(--network); opacity: .75; }
+    .heat-1 { fill: #231d35; }
+    .heat-2 { fill: #4f2b6b; }
+    .heat-3 { fill: #8e43a8; }
+    .heat-4 { fill: #da75e7; }
+    .wave { fill: none; stroke: var(--audio); stroke-width: 2; vector-effect: non-scaling-stroke; }
+
+    .readout {
+      display: grid;
+      grid-template-columns: minmax(0, 1.3fr) minmax(18rem, .7fr);
+      gap: 1px;
+      border-top: 1px solid #29424c;
+      background: #29424c;
+    }
+    .readout > div { min-height: 7.4rem; padding: 1.15rem 1.25rem; background: #0a171c; }
+    .readout h2 { margin: 0 0 .55rem; font-size: .8rem; text-transform: uppercase; letter-spacing: .11em; color: var(--core); }
+    .readout p { margin: 0; color: #c5d7dc; line-height: 1.55; }
+    .readout code { color: var(--audio); font: 600 .82em ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .readout .meta { margin-top: .7rem; color: var(--muted); font: 500 .74rem/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .boundary strong { color: #eaf4f6; }
+
+    .sequence {
+      padding: 2.8rem 0 3.4rem;
+    }
+    .section-head { display: flex; justify-content: space-between; align-items: end; gap: 2rem; margin-bottom: 1rem; }
+    .section-head h2 { margin: 0; font-size: clamp(1.35rem, 2vw, 2rem); letter-spacing: -.035em; }
+    .section-head p { max-width: 38rem; margin: 0; color: var(--muted); line-height: 1.5; }
+    .steps { display: grid; grid-template-columns: repeat(5, 1fr); gap: .7rem; }
+    .step {
+      position: relative;
+      min-height: 11rem;
+      padding: 1rem;
+      border: 1px solid var(--line);
+      border-radius: .85rem;
+      background: linear-gradient(145deg, #0d1c22, #091318);
+    }
+    .step::after { content: "→"; position: absolute; right: -.62rem; top: 2.1rem; z-index: 2; color: #59717a; font-weight: 800; }
+    .step:last-child::after { display: none; }
+    .step-number { display: inline-grid; place-items: center; width: 1.65rem; height: 1.65rem; border-radius: .42rem; color: #071014; background: var(--core); font: 800 .76rem ui-monospace, monospace; }
+    .step h3 { margin: .9rem 0 .45rem; font-size: .95rem; }
+    .step p { margin: 0; color: var(--muted); font-size: .82rem; line-height: 1.5; }
+
+    .notes {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: .8rem;
+      padding-bottom: 3rem;
+    }
+    .note {
+      padding: 1.1rem 1.2rem;
+      border: 1px solid var(--line);
+      border-radius: .85rem;
+      background: #091419;
+    }
+    .note h3 { margin: 0 0 .5rem; font-size: .9rem; }
+    .note p { margin: 0; color: var(--muted); font-size: .82rem; line-height: 1.55; }
+    .note.local h3 { color: var(--audio); }
+    .note.upstream h3 { color: #a9bac0; }
+
+    footer { padding: 0 0 2.4rem; color: #607983; font: 500 .72rem ui-monospace, monospace; }
+
+    @media (max-width: 58rem) {
+      header { display: block; }
+      .repo-stamp { display: inline-block; margin-top: 1.2rem; }
+      .toolbar { align-items: flex-start; flex-direction: column; }
+      svg { min-height: 26rem; }
+      .readout { grid-template-columns: 1fr; }
+      .steps { grid-template-columns: 1fr 1fr; }
+      .step::after { display: none; }
+      .notes { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 38rem) {
+      :root { --rail: min(100% - 1rem, 92rem); }
+      header { padding-top: 1.5rem; }
+      .legend { display: none; }
+      .steps { grid-template-columns: 1fr; }
+      svg { min-height: 23rem; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      * { scroll-behavior: auto !important; }
+      .pulse { animation: none; }
+    }
+  </style>
+</head>
+<body>
+  <header class="shell">
+    <div>
+      <p class="eyebrow">Scope Studio / verified local architecture</p>
+      <h1>A shared signal-processing framework for terminal scopes.</h1>
+      <p class="lede">Audio and network applications provide different sources and renderers. The local <strong>scope-core</strong> crate owns the generic event loop, configuration, shared series model, and terminal rendering pipeline.</p>
+    </div>
+    <div class="repo-stamp">workspace: scope-studio<br>branch: feature/circular-waveform<br>artifact: docs/architecture.html</div>
+  </header>
+
+  <main class="shell">
+    <div class="toolbar" aria-label="Diagram controls">
+      <div class="filters" role="group" aria-label="Highlight a data path">
+        <button class="filter" data-filter="all" aria-pressed="true">Whole framework</button>
+        <button class="filter" data-filter="audio" aria-pressed="false">Audio path</button>
+        <button class="filter" data-filter="network" aria-pressed="false">Network path</button>
+        <button class="filter" data-filter="core" aria-pressed="false">Shared core</button>
+      </div>
+      <div class="legend" aria-label="Color legend">
+        <span class="key" style="--key:var(--audio)">audio</span>
+        <span class="key" style="--key:var(--network)">network</span>
+        <span class="key" style="--key:var(--core)">control</span>
+        <span class="key" style="--key:var(--render)">render</span>
+      </div>
+    </div>
+
+    <section class="instrument" aria-labelledby="diagram-title">
+      <svg viewBox="0 0 1440 900" role="img" aria-labelledby="diagram-title diagram-desc">
+        <title id="diagram-title">Scope Studio framework architecture</title>
+        <desc id="diagram-desc">An interactive signal console showing audio and network sources feeding application crates, the shared Scope Core event loop, rendering styles, and the Ratatui terminal.</desc>
+        <defs>
+          <linearGradient id="caseFace" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#152a32"/>
+            <stop offset="1" stop-color="#091419"/>
+          </linearGradient>
+          <linearGradient id="coreFace" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#302612"/>
+            <stop offset="1" stop-color="#15130e"/>
+          </linearGradient>
+          <filter id="softGlow" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur stdDeviation="4" result="b"/>
+            <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+          <pattern id="perforation" width="10" height="10" patternUnits="userSpaceOnUse">
+            <circle cx="5" cy="5" r="1.2" fill="#29424c"/>
+          </pattern>
+        </defs>
+
+        <!-- chassis -->
+        <path d="M44 91 L1396 91 L1415 111 L1415 826 L1396 846 L44 846 L25 826 L25 111 Z" fill="#050b0e" stroke="#36515b" stroke-width="2"/>
+        <rect x="42" y="108" width="1356" height="720" rx="14" fill="url(#caseFace)" stroke="#2c4650"/>
+        <rect x="53" y="119" width="1334" height="36" rx="7" class="rack-top"/>
+        <text x="72" y="142" class="svg-kicker">SCOPE STUDIO // SIGNAL ROUTING CONSOLE</text>
+        <text x="1364" y="142" text-anchor="end" class="svg-small">local workspace crates</text>
+        <g aria-hidden="true">
+          <circle cx="43" cy="109" r="5" class="screw"/><circle cx="1397" cy="109" r="5" class="screw"/>
+          <circle cx="43" cy="827" r="5" class="screw"/><circle cx="1397" cy="827" r="5" class="screw"/>
+        </g>
+
+        <!-- section labels -->
+        <text x="73" y="185" class="svg-kicker">01 / INPUTS</text>
+        <text x="342" y="185" class="svg-kicker">02 / APP CRATES</text>
+        <text x="645" y="185" class="svg-kicker">03 / SHARED BACKPLANE</text>
+        <text x="1003" y="185" class="svg-kicker">04 / VISUAL STYLES</text>
+        <text x="1250" y="185" class="svg-kicker">05 / OUTPUT</text>
+
+        <!-- cables first: behind hardware -->
+        <g class="flow-cables" aria-hidden="true">
+          <path class="cable audio pulse" data-domain="audio" d="M260 264 C300 264 306 268 342 268"/>
+          <path class="cable audio pulse" data-domain="audio" d="M260 346 C300 346 306 307 342 307"/>
+          <path class="cable audio" data-domain="audio" d="M260 424 C304 424 306 350 342 350"/>
+          <path class="cable network pulse" data-domain="network" d="M260 586 C304 586 306 568 342 568"/>
+          <path class="cable network pulse" data-domain="network" d="M260 666 C304 666 306 608 342 608"/>
+          <path class="cable audio pulse" data-domain="audio" d="M578 325 C610 325 613 325 644 325"/>
+          <path class="cable network pulse" data-domain="network" d="M578 592 C610 592 613 592 644 592"/>
+          <path class="cable control" data-domain="core" d="M839 257 C907 257 918 257 985 257"/>
+          <path class="cable output pulse" data-domain="audio core" d="M949 414 C975 414 981 414 1004 414"/>
+          <path class="cable output pulse" data-domain="network core" d="M949 623 C977 623 980 623 1004 623"/>
+          <path class="cable output pulse" data-domain="audio network core" d="M1217 455 C1231 455 1236 455 1248 455"/>
+          <path class="cable control" data-domain="core" d="M1325 686 C1325 748 893 774 806 703"/>
+          <path class="cable reference" data-domain="reference" d="M487 755 C487 805 723 809 723 758"/>
+        </g>
+
+        <!-- input rack -->
+        <g class="node" data-domain="audio" data-detail="pipewire" tabindex="0" role="button" aria-label="PipeWire system capture">
+          <rect x="70" y="213" width="190" height="92" rx="8" class="bay bay-audio"/>
+          <rect x="82" y="227" width="38" height="64" rx="4" class="slot"/>
+          <circle cx="101" cy="246" r="5" fill="var(--audio)" class="led" style="color:var(--audio)"/>
+          <path d="M91 273 C95 259 99 284 103 268 S111 253 115 273" class="wave"/>
+          <text x="133" y="244" class="svg-tiny">DEFAULT / LINUX</text>
+          <text x="133" y="267" class="svg-title">PipeWire</text>
+          <text x="133" y="286" class="svg-small">pw-cat → f32 PCM</text>
+        </g>
+
+        <g class="node" data-domain="audio" data-detail="cpal" tabindex="0" role="button" aria-label="CPAL safe capture">
+          <rect x="70" y="318" width="190" height="79" rx="8" class="bay bay-audio"/>
+          <circle cx="94" cy="344" r="5" fill="var(--audio)" opacity=".75"/>
+          <text x="111" y="348" class="svg-label">CPAL SafeCapture</text>
+          <text x="91" y="374" class="svg-small">input device fallback</text>
+        </g>
+
+        <g class="node" data-domain="audio" data-detail="mpris" tabindex="0" role="button" aria-label="MPRIS metadata side channel">
+          <rect x="70" y="410" width="190" height="67" rx="8" class="bay"/>
+          <rect x="86" y="426" width="31" height="31" rx="4" fill="#17262c" stroke="#3c5963"/>
+          <path d="M98 434 L98 451 L111 443 Z" fill="#9cb3bb"/>
+          <text x="130" y="438" class="svg-label">MPRIS metadata</text>
+          <text x="130" y="457" class="svg-small">read-only side channel</text>
+        </g>
+
+        <g class="node" data-domain="network" data-detail="procwireless" tabindex="0" role="button" aria-label="proc net wireless input">
+          <rect x="70" y="538" width="190" height="92" rx="8" class="bay bay-network"/>
+          <circle cx="101" cy="564" r="4" fill="var(--network)" class="led" style="color:var(--network)"/>
+          <path d="M88 591 Q101 577 114 591 M93 596 Q101 587 109 596 M99 601 Q101 599 103 601" fill="none" stroke="var(--network)" stroke-width="2"/>
+          <text x="130" y="570" class="svg-title">/proc/net</text>
+          <text x="130" y="592" class="svg-small">wireless → RSSI</text>
+          <text x="130" y="609" class="svg-small">dev → RX / TX bytes</text>
+        </g>
+
+        <g class="node" data-domain="network" data-detail="clock" tabindex="0" role="button" aria-label="Monotonic sample clock">
+          <rect x="70" y="643" width="190" height="67" rx="8" class="bay bay-network"/>
+          <circle cx="101" cy="676" r="16" fill="#0b1725" stroke="#4f75ac"/>
+          <path d="M101 664 V676 L110 682" fill="none" stroke="var(--network)" stroke-width="2" stroke-linecap="round"/>
+          <text x="130" y="672" class="svg-label">Sample clock</text>
+          <text x="130" y="692" class="svg-small">byte deltas → Mbit/s</text>
+        </g>
+
+        <!-- app crates -->
+        <g class="node" data-domain="audio" data-detail="audioscope" tabindex="0" role="button" aria-label="audio-scope application crate">
+          <rect x="342" y="213" width="236" height="242" rx="10" class="rack"/>
+          <rect x="355" y="226" width="210" height="44" rx="5" class="bay-audio"/>
+          <text x="371" y="245" class="svg-tiny">BINARY CRATE</text>
+          <text x="371" y="262" class="svg-title">audio-scope</text>
+          <rect x="355" y="282" width="210" height="48" rx="4" class="slot"/>
+          <text x="369" y="301" class="svg-label">AudioSource</text>
+          <text x="548" y="301" text-anchor="end" class="svg-small">1–2 channels</text>
+          <text x="369" y="319" class="svg-small">ChannelHistory + RingBuffer</text>
+          <rect x="355" y="341" width="210" height="96" rx="4" class="slot"/>
+          <text x="369" y="362" class="svg-label">AudioRenderer</text>
+          <text x="369" y="382" class="svg-small">mono views → downmix</text>
+          <text x="369" y="400" class="svg-small">Lissajous → stereo pairs</text>
+          <text x="369" y="418" class="svg-small">view / theme / history state</text>
+          <g aria-hidden="true"><circle cx="353" cy="223" r="3" class="screw"/><circle cx="567" cy="223" r="3" class="screw"/><circle cx="353" cy="445" r="3" class="screw"/><circle cx="567" cy="445" r="3" class="screw"/></g>
+        </g>
+
+        <g class="node" data-domain="network" data-detail="netscope" tabindex="0" role="button" aria-label="net-scope application crate">
+          <rect x="342" y="507" width="236" height="203" rx="10" class="rack"/>
+          <rect x="355" y="520" width="210" height="44" rx="5" class="bay-network"/>
+          <text x="371" y="539" class="svg-tiny">BINARY CRATE</text>
+          <text x="371" y="556" class="svg-title">net-scope</text>
+          <rect x="355" y="577" width="210" height="53" rx="4" class="slot"/>
+          <text x="369" y="598" class="svg-label">NetSource</text>
+          <text x="369" y="617" class="svg-small">RSSI · noise · RX · TX</text>
+          <rect x="355" y="642" width="210" height="51" rx="4" class="slot"/>
+          <text x="369" y="663" class="svg-label">NetRenderer</text>
+          <text x="369" y="682" class="svg-small">bounds + four line series</text>
+          <g aria-hidden="true"><circle cx="353" cy="517" r="3" class="screw"/><circle cx="567" cy="517" r="3" class="screw"/><circle cx="353" cy="700" r="3" class="screw"/><circle cx="567" cy="700" r="3" class="screw"/></g>
+        </g>
+
+        <!-- DSP cartridge -->
+        <g class="node" data-domain="audio" data-detail="dsp" tabindex="0" role="button" aria-label="Audio DSP cartridge">
+          <rect x="342" y="466" width="236" height="31" rx="5" fill="#102b29" stroke="#2c6b60"/>
+          <text x="355" y="486" class="svg-small">DSP: Hann → rustfft → 64 log-frequency bins</text>
+          <g fill="var(--audio)" opacity=".75">
+            <rect x="526" y="477" width="3" height="10"/><rect x="532" y="473" width="3" height="14"/><rect x="538" y="480" width="3" height="7"/><rect x="544" y="470" width="3" height="17"/><rect x="550" y="476" width="3" height="11"/><rect x="556" y="468" width="3" height="19"/>
+          </g>
+        </g>
+
+        <!-- shared core rack -->
+        <g class="node" data-domain="core" data-detail="core" tabindex="0" role="button" aria-label="scope-core shared crate">
+          <rect x="644" y="213" width="305" height="497" rx="12" fill="url(#coreFace)" stroke="#86642c" stroke-width="1.5"/>
+          <rect x="659" y="228" width="275" height="74" rx="6" class="bay-core"/>
+          <circle cx="680" cy="249" r="6" fill="var(--core)" filter="url(#softGlow)"/>
+          <text x="700" y="254" class="svg-tiny">LOCAL LIBRARY CRATE</text>
+          <text x="678" y="282" class="svg-title">scope-core</text>
+          <text x="916" y="282" text-anchor="end" class="svg-small">shared runtime</text>
+
+          <rect x="659" y="317" width="275" height="75" rx="5" class="slot"/>
+          <text x="674" y="340" class="svg-label">DataSource trait</text>
+          <text x="674" y="362" class="svg-small">next_frame() → Option&lt;Matrix&gt;</text>
+          <text x="674" y="380" class="svg-tiny">ADAPTER BOUNDARY</text>
+
+          <rect x="659" y="407" width="275" height="116" rx="5" class="slot"/>
+          <text x="674" y="431" class="svg-label">run_app&lt;S, R&gt;</text>
+          <text x="674" y="454" class="svg-small">FramePacer + redraw invalidation</text>
+          <text x="674" y="473" class="svg-small">AppConfig + terminal cell aspect</text>
+          <text x="674" y="492" class="svg-small">Crossterm event dispatch</text>
+          <g transform="translate(866 430)" aria-hidden="true">
+            <circle cx="22" cy="22" r="20" fill="#17150f" stroke="#765a2b"/>
+            <path d="M22 8 V22 L33 28" fill="none" stroke="var(--core)" stroke-width="2.5" stroke-linecap="round"/>
+          </g>
+
+          <rect x="659" y="538" width="275" height="74" rx="5" class="slot"/>
+          <text x="674" y="562" class="svg-label">Renderer trait</text>
+          <text x="674" y="583" class="svg-small">process() → Vec&lt;Series&gt;</text>
+          <text x="674" y="600" class="svg-small">visual_style() + header + bounds</text>
+
+          <rect x="659" y="627" width="275" height="66" rx="5" class="slot"/>
+          <text x="674" y="650" class="svg-label">render::draw_frame</text>
+          <text x="674" y="671" class="svg-small">Series model → selected style</text>
+          <g aria-hidden="true">
+            <circle cx="655" cy="224" r="3" class="screw"/><circle cx="938" cy="224" r="3" class="screw"/>
+            <circle cx="655" cy="699" r="3" class="screw"/><circle cx="938" cy="699" r="3" class="screw"/>
+          </g>
+        </g>
+
+        <!-- style matrix -->
+        <g class="node" data-domain="audio core" data-detail="styles" tabindex="0" role="button" aria-label="Audio visual style matrix">
+          <rect x="1004" y="213" width="213" height="376" rx="10" class="rack"/>
+          <rect x="1017" y="226" width="187" height="42" rx="5" class="bay-render"/>
+          <text x="1031" y="244" class="svg-tiny">VISUALSTYLE DISPATCH</text>
+          <text x="1031" y="260" class="svg-label">Audio views</text>
+
+          <g transform="translate(1017 282)">
+            <rect width="88" height="82" rx="5" class="slot"/>
+            <text x="10" y="19" class="svg-small">LINE</text>
+            <path d="M9 55 C20 25 28 72 39 48 S61 25 79 54" class="wave"/>
+            <text x="10" y="73" class="svg-tiny">WAVE</text>
+          </g>
+          <g transform="translate(1116 282)">
+            <rect width="88" height="82" rx="5" class="slot"/>
+            <text x="10" y="19" class="svg-small">MIST</text>
+            <path d="M9 38 C19 20 28 53 40 35 S65 25 79 42 M9 55 C22 42 34 65 48 52 S68 46 79 58" fill="none" stroke="var(--audio)" opacity=".72" stroke-dasharray="2 3"/>
+            <text x="10" y="73" class="svg-tiny">OCEAN</text>
+          </g>
+          <g transform="translate(1017 375)">
+            <rect width="88" height="82" rx="5" class="slot"/>
+            <text x="10" y="19" class="svg-small">BARS</text>
+            <g fill="var(--render)" opacity=".82"><rect x="10" y="53" width="8" height="15"/><rect x="23" y="43" width="8" height="25"/><rect x="36" y="29" width="8" height="39"/><rect x="49" y="49" width="8" height="19"/><rect x="62" y="36" width="8" height="32"/></g>
+            <text x="10" y="78" class="svg-tiny">SPECTRUM</text>
+          </g>
+          <g transform="translate(1116 375)">
+            <rect width="88" height="82" rx="5" class="slot"/>
+            <text x="10" y="19" class="svg-small">HEATMAP</text>
+            <g transform="translate(10 27)"><rect width="13" height="9" class="heat-1"/><rect x="14" width="13" height="9" class="heat-2"/><rect x="28" width="13" height="9" class="heat-4"/><rect x="42" width="13" height="9" class="heat-2"/><rect x="56" width="13" height="9" class="heat-1"/><rect y="10" width="13" height="9" class="heat-2"/><rect x="14" y="10" width="13" height="9" class="heat-3"/><rect x="28" y="10" width="13" height="9" class="heat-4"/><rect x="42" y="10" width="13" height="9" class="heat-3"/><rect x="56" y="10" width="13" height="9" class="heat-2"/><rect y="20" width="13" height="9" class="heat-1"/><rect x="14" y="20" width="13" height="9" class="heat-2"/><rect x="28" y="20" width="13" height="9" class="heat-3"/><rect x="42" y="20" width="13" height="9" class="heat-4"/><rect x="56" y="20" width="13" height="9" class="heat-2"/></g>
+            <text x="10" y="73" class="svg-tiny">SPECTROGRAM</text>
+          </g>
+          <g transform="translate(1017 468)">
+            <rect width="88" height="82" rx="5" class="slot"/>
+            <text x="10" y="19" class="svg-small">X–Y</text>
+            <path d="M44 25 C73 25 73 64 44 64 C15 64 15 25 44 25 Z" fill="none" stroke="var(--render)" stroke-width="1.8" transform="rotate(18 44 44)"/>
+            <text x="10" y="73" class="svg-tiny">LISSAJOUS</text>
+          </g>
+          <g transform="translate(1116 468)">
+            <rect width="88" height="82" rx="5" class="slot"/>
+            <text x="10" y="19" class="svg-small">HISTORY</text>
+            <path d="M9 56 C22 31 32 65 45 42 S66 33 79 54" fill="none" stroke="var(--render)" opacity=".25"/><path d="M9 51 C22 26 32 60 45 37 S66 28 79 49" fill="none" stroke="var(--render)" opacity=".5"/><path d="M9 46 C22 21 32 55 45 32 S66 23 79 44" fill="none" stroke="var(--render)"/>
+            <text x="10" y="73" class="svg-tiny">PERSIST</text>
+          </g>
+        </g>
+
+        <g class="node" data-domain="network core" data-detail="netstyle" tabindex="0" role="button" aria-label="Network line style">
+          <rect x="1004" y="604" width="213" height="106" rx="9" class="rack"/>
+          <text x="1021" y="628" class="svg-tiny">NETWORK VIEW</text>
+          <text x="1021" y="649" class="svg-label">Four aligned line series</text>
+          <path d="M1021 680 C1042 651 1063 694 1084 666 S1126 653 1147 675 S1174 660 1199 666" fill="none" stroke="var(--network)" stroke-width="2"/>
+          <path d="M1021 687 C1042 675 1063 681 1084 678 S1126 688 1147 674 S1174 685 1199 676" fill="none" stroke="#8db9ff" opacity=".55"/>
+        </g>
+
+        <!-- terminal output -->
+        <g class="node" data-domain="audio network core" data-detail="terminal" tabindex="0" role="button" aria-label="Ratatui Crossterm terminal output">
+          <rect x="1248" y="213" width="120" height="497" rx="11" class="rack"/>
+          <rect x="1260" y="227" width="96" height="42" rx="5" class="bay-output"/>
+          <text x="1308" y="245" text-anchor="middle" class="svg-tiny">RATATUI</text>
+          <text x="1308" y="261" text-anchor="middle" class="svg-label">Terminal</text>
+          <rect x="1260" y="283" width="96" height="337" rx="5" fill="#030809" stroke="#55302c"/>
+          <text x="1270" y="304" class="svg-tiny" fill="#c86f62">CROSSTERM</text>
+          <g transform="translate(1270 325)" fill="var(--output)">
+            <rect x="0" y="97" width="7" height="26"/><rect x="11" y="81" width="7" height="42"/><rect x="22" y="62" width="7" height="61"/><rect x="33" y="91" width="7" height="32"/><rect x="44" y="43" width="7" height="80"/><rect x="55" y="74" width="7" height="49"/><rect x="66" y="27" width="7" height="96"/><rect x="77" y="56" width="7" height="67"/>
+          </g>
+          <path d="M1270 512 C1283 469 1295 543 1307 496 S1332 475 1346 516" fill="none" stroke="var(--audio)" stroke-width="2"/>
+          <g transform="translate(1270 546)"><rect width="15" height="11" class="heat-1"/><rect x="16" width="15" height="11" class="heat-3"/><rect x="32" width="15" height="11" class="heat-4"/><rect x="48" width="15" height="11" class="heat-2"/><rect x="64" width="15" height="11" class="heat-1"/><rect y="12" width="15" height="11" class="heat-2"/><rect x="16" y="12" width="15" height="11" class="heat-4"/><rect x="32" y="12" width="15" height="11" class="heat-3"/><rect x="48" y="12" width="15" height="11" class="heat-4"/><rect x="64" y="12" width="15" height="11" class="heat-2"/></g>
+          <text x="1308" y="648" text-anchor="middle" class="svg-small">draw_frame()</text>
+          <text x="1308" y="668" text-anchor="middle" class="svg-small">ANSI / Braille</text>
+          <text x="1308" y="688" text-anchor="middle" class="svg-small">true color</text>
+        </g>
+
+        <!-- keyboard feedback panel -->
+        <g class="node" data-domain="core" data-detail="controls" tabindex="0" role="button" aria-label="Keyboard and resize feedback loop">
+          <rect x="644" y="724" width="724" height="67" rx="8" class="bay"/>
+          <text x="663" y="747" class="svg-tiny">FEEDBACK LOOP</text>
+          <text x="663" y="771" class="svg-label">keys / resize</text>
+          <g transform="translate(790 740)">
+            <rect width="48" height="33" rx="4" class="slot"/><text x="24" y="21" text-anchor="middle" class="svg-small">v · t · b</text>
+            <rect x="58" width="48" height="33" rx="4" class="slot"/><text x="82" y="21" text-anchor="middle" class="svg-small">↑ ↓ ← →</text>
+            <rect x="116" width="48" height="33" rx="4" class="slot"/><text x="140" y="21" text-anchor="middle" class="svg-small">space</text>
+            <rect x="174" width="48" height="33" rx="4" class="slot"/><text x="198" y="21" text-anchor="middle" class="svg-small">?</text>
+          </g>
+          <text x="1030" y="752" class="svg-small">Renderer::handle_event</text>
+          <text x="1030" y="772" class="svg-small">AppConfig → redraw_pending</text>
+          <circle cx="1346" cy="757" r="6" fill="var(--core)" class="led" style="color:var(--core)"/>
+        </g>
+
+        <!-- upstream reference plate -->
+        <g class="node" data-domain="reference" data-detail="upstream" tabindex="0" role="button" aria-label="Upstream scope-tui reference relationship">
+          <rect x="342" y="736" width="236" height="55" rx="7" fill="#10191d" stroke="#53666d" stroke-dasharray="5 5"/>
+          <text x="356" y="757" class="svg-tiny">UPSTREAM / REFERENCE ONLY</text>
+          <text x="356" y="778" class="svg-label">alemidev/scope-tui</text>
+          <text x="565" y="778" text-anchor="end" class="svg-small">no linked crate</text>
+        </g>
+      </svg>
+
+      <div class="readout" aria-live="polite">
+        <div>
+          <h2 id="detail-title">Whole framework</h2>
+          <p id="detail-body">Two application crates plug source-specific capture and processing into a generic local runtime. Frames become shared <code>Series</code>, then <code>draw_frame()</code> dispatches to the selected terminal visualization.</p>
+          <p class="meta" id="detail-meta">Click any hardware module to inspect its role and source location.</p>
+        </div>
+        <div class="boundary">
+          <h2>Dependency boundary</h2>
+          <p><strong>Direct:</strong> <code>audio-scope</code> and <code>net-scope</code> depend on local <code>../scope-core</code>.<br><strong>Not direct:</strong> upstream <code>scope-tui</code> is not a Cargo, Git, or runtime dependency.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="sequence" aria-labelledby="sequence-title">
+      <div class="section-head">
+        <h2 id="sequence-title">One frame through the framework</h2>
+        <p>The generic loop never needs to know whether the measurements came from PCM audio or Linux network counters.</p>
+      </div>
+      <div class="steps">
+        <article class="step"><span class="step-number">01</span><h3>Capture</h3><p>PipeWire, CPAL, or <code>/proc/net</code> produces source-specific measurements.</p></article>
+        <article class="step"><span class="step-number">02</span><h3>Adapt</h3><p>A <code>DataSource</code> implementation returns a channel-oriented <code>Matrix</code>.</p></article>
+        <article class="step"><span class="step-number">03</span><h3>Process</h3><p>The app renderer converts a frame into reusable shared <code>Series</code>.</p></article>
+        <article class="step"><span class="step-number">04</span><h3>Dispatch</h3><p><code>VisualStyle</code> selects lines, bars, heatmap, X–Y, mist, or persistence.</p></article>
+        <article class="step"><span class="step-number">05</span><h3>Paint</h3><p>Ratatui writes the composed frame through Crossterm to the live terminal.</p></article>
+      </div>
+    </section>
+
+    <section class="notes" aria-label="Architecture notes">
+      <article class="note local"><h3>What is reusable</h3><p><code>scope-core</code> is the framework boundary: implement <code>DataSource</code> and <code>Renderer</code>, then reuse pacing, input handling, configuration, terminal lifecycle, shared series, and visual dispatch.</p></article>
+      <article class="note upstream"><h3>What “uses Scope-TUI” means here</h3><p>The repository keeps an upstream Scope-TUI remote as a reference, but the running applications use this workspace’s local crates. Spectrum and spectrogram DSP/rendering were added locally rather than imported from upstream’s Spectroscope module.</p></article>
+    </section>
+  </main>
+
+  <footer class="shell">Verified against the local source tree · crates/audio-scope · crates/net-scope · crates/scope-core</footer>
+
+  <script>
+    const details = {
+      pipewire: ["PipeWire system capture", "The default Linux path launches pw-cat and reads synchronized raw f32 PCM into bounded per-channel history.", "crates/audio-scope/src/audio.rs · SystemCapture"],
+      cpal: ["CPAL safe capture", "The fallback input path negotiates a supported device configuration and writes samples into the same channel-history abstraction.", "crates/audio-scope/src/audio.rs · SafeCapture"],
+      mpris: ["MPRIS metadata", "A read-only side channel supplies player, state, artist, and title for the audio header. It does not enter the signal DSP.", "crates/audio-scope/src/media.rs"],
+      procwireless: ["Linux network counters", "NetSource reads RSSI from /proc/net/wireless and byte counters from /proc/net/dev.", "crates/net-scope/src/network.rs"],
+      clock: ["Network sample clock", "Monotonic elapsed time converts RX/TX byte deltas to Mbit/s before values enter bounded history.", "crates/net-scope/src/network.rs · NetSource::next_frame"],
+      audioscope: ["audio-scope application", "Owns audio capture selection, view state, downmix rules, stereo bypass, media text, DSP orchestration, themes, and peak/history behavior.", "crates/audio-scope/src/main.rs"],
+      netscope: ["net-scope application", "Turns four network histories into named line series and derives the active vertical bounds.", "crates/net-scope/src/main.rs"],
+      dsp: ["Audio DSP cartridge", "Caches FFT plans and Hann windows, analyzes recent samples, maps -80..0 dBFS into 64 logarithmic bins, and optionally synthesizes filtered wave bands.", "crates/audio-scope/src/dsp.rs"],
+      core: ["scope-core shared runtime", "The generic run_app loop connects any DataSource to any Renderer, owns pacing and events, and invokes draw_frame only when a redraw is pending.", "crates/scope-core/src/lib.rs"],
+      styles: ["Audio visual styles", "AudioRenderer maps Wave, Ocean Mist, Spectrum, Spectrogram, Lissajous, and Persistence onto the shared VisualStyle dispatch.", "crates/audio-scope/src/main.rs → crates/scope-core/src/render.rs"],
+      netstyle: ["Network line rendering", "The network app uses the shared Line style with RSSI, noise, RX, and TX series.", "crates/net-scope/src/main.rs → scope-core"],
+      terminal: ["Ratatui terminal output", "draw_frame composes header, chart, help overlay, background, and style-specific pixels before Crossterm presents the terminal frame.", "crates/scope-core/src/render.rs"],
+      controls: ["Interactive feedback loop", "Crossterm key and resize events mutate AppConfig or renderer-local state, then invalidate the retained frame for redraw.", "crates/scope-core/src/lib.rs · run_app"],
+      upstream: ["Scope-TUI upstream", "The configured upstream is architectural and historical reference metadata. This workspace has no Cargo or Git dependency on its crate; current Git history also retains no common merge base with upstream/dev.", "git remote: alemidev/scope-tui · relationship: reference only"]
+    };
+
+    const nodes = [...document.querySelectorAll('.node')];
+    const cables = [...document.querySelectorAll('.cable')];
+    const filters = [...document.querySelectorAll('.filter')];
+    const title = document.querySelector('#detail-title');
+    const body = document.querySelector('#detail-body');
+    const meta = document.querySelector('#detail-meta');
+
+    function showDetail(key, element) {
+      const detail = details[key];
+      if (!detail) return;
+      nodes.forEach(node => node.classList.toggle('is-active', node === element));
+      title.textContent = detail[0];
+      body.textContent = detail[1];
+      meta.textContent = detail[2];
+    }
+
+    nodes.forEach(node => {
+      node.addEventListener('click', () => showDetail(node.dataset.detail, node));
+      node.addEventListener('keydown', event => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          showDetail(node.dataset.detail, node);
+        }
+      });
+    });
+
+    function applyFilter(filter) {
+      filters.forEach(button => button.setAttribute('aria-pressed', String(button.dataset.filter === filter)));
+      nodes.forEach(node => {
+        const domains = (node.dataset.domain || '').split(' ');
+        node.classList.toggle('is-dim', filter !== 'all' && !domains.includes(filter));
+        node.classList.remove('is-active');
+      });
+      cables.forEach(cable => {
+        const domains = (cable.dataset.domain || '').split(' ');
+        cable.classList.toggle('is-dim', filter !== 'all' && !domains.includes(filter));
+      });
+      const copy = {
+        all: ["Whole framework", "Two application crates plug source-specific capture and processing into a generic local runtime. Frames become shared Series, then draw_frame() dispatches to the selected terminal visualization.", "Click any hardware module to inspect its role and source location."],
+        audio: ["Audio path", "PipeWire or CPAL fills channel history. AudioRenderer either downmixes into DSP views or preserves measured stereo pairs for Lissajous, then emits shared Series.", "Audio path highlighted · MPRIS remains a metadata side channel."],
+        network: ["Network path", "NetSource samples Linux counters, computes rates, and emits four histories. NetRenderer packages them as line Series for the same core loop and terminal renderer.", "Network path highlighted · no audio DSP involved."],
+        core: ["Shared scope-core", "DataSource and Renderer are the plug-in boundaries. run_app owns pacing, input, configuration, redraw decisions, terminal lifecycle, and visual dispatch.", "Shared-core path highlighted · both binaries depend on ../scope-core."]
+      }[filter];
+      title.textContent = copy[0]; body.textContent = copy[1]; meta.textContent = copy[2];
+    }
+
+    filters.forEach(button => button.addEventListener('click', () => applyFilter(button.dataset.filter)));
+  </script>
+</body>
+</html>
