@@ -671,7 +671,7 @@ fn heat_color(level: f64, background: Color) -> Color {
 struct PersistenceTraceEffect {
     time_zoom: f64,
     amplitude_zoom: f64,
-    points_only: bool,
+    visible: bool,
 }
 
 fn persistence_trace_effect(
@@ -695,9 +695,9 @@ fn persistence_trace_effect(
         // the current waveform.
         time_zoom: 1.0 + 0.10 * trail,
         amplitude_zoom: 1.0 + 0.05 * trail,
-        // Connected high-frequency trails fill vertical Braille cells quickly.
-        // Keep the live treble line continuous, but leave its history hairline-thin.
-        points_only: band_count == 3 && traces_after.is_multiple_of(band_count) && age > 0,
+        // Retained high-frequency traces alias into a dense Braille band. Keep
+        // only the live treble trace; bass and mid still retain full history.
+        visible: !(band_count == 3 && traces_after.is_multiple_of(band_count) && age > 0),
     }
 }
 
@@ -742,6 +742,9 @@ fn render_persistence(
         .paint(|ctx| {
             for (trace_index, trace) in series.iter().enumerate() {
                 let effect = persistence_trace_effect(trace_index, series.len(), band_count);
+                if !effect.visible {
+                    continue;
+                }
                 let start = trace.samples.len().saturating_sub(visible_len);
                 let window = &trace.samples[start..];
                 if window.is_empty() {
@@ -769,12 +772,7 @@ fn render_persistence(
                     let current = sample_at(col);
                     // CanvasLine rejects either clipped endpoint. Keep an in-range
                     // point when its preceding neighbor lies outside the viewport.
-                    if effect.points_only {
-                        ctx.draw(&Points {
-                            coords: &[(col as f64, current)],
-                            color: trace.color,
-                        });
-                    } else if (y_bounds[0]..=y_bounds[1]).contains(&previous) {
+                    if (y_bounds[0]..=y_bounds[1]).contains(&previous) {
                         ctx.draw(&CanvasLine {
                             x1: (col - 1) as f64,
                             y1: previous,
@@ -1142,33 +1140,33 @@ mod tests {
     }
 
     #[test]
-    fn persistence_trails_zoom_subtly_and_historical_treble_uses_points() -> io::Result<()> {
+    fn persistence_trails_zoom_subtly_and_only_live_treble_is_visible() -> io::Result<()> {
         let oldest_bass = persistence_trace_effect(0, 12, 3);
         let oldest_treble = persistence_trace_effect(2, 12, 3);
         let newest_treble = persistence_trace_effect(11, 12, 3);
         assert_eq!(oldest_bass.time_zoom, 1.10);
         assert_eq!(oldest_bass.amplitude_zoom, 1.05);
-        assert!(!oldest_bass.points_only);
-        assert!(oldest_treble.points_only);
+        assert!(oldest_bass.visible);
+        assert!(!oldest_treble.visible);
         assert_eq!(
             newest_treble,
             PersistenceTraceEffect {
                 time_zoom: 1.0,
                 amplitude_zoom: 1.0,
-                points_only: false,
+                visible: true,
             }
         );
 
         // Age is measured from the newest frame, so even an incomplete oldest
-        // frame cannot accidentally zoom or disconnect current bands.
-        assert!(persistence_trace_effect(0, 4, 3).points_only);
+        // frame cannot accidentally zoom or hide current bands.
+        assert!(!persistence_trace_effect(0, 4, 3).visible);
         for trace_index in 1..4 {
             assert_eq!(
                 persistence_trace_effect(trace_index, 4, 3),
                 PersistenceTraceEffect {
                     time_zoom: 1.0,
                     amplitude_zoom: 1.0,
-                    points_only: false,
+                    visible: true,
                 }
             );
         }
@@ -1199,7 +1197,7 @@ mod tests {
         for (trace, name) in current.iter_mut().zip(["bass", "mid", "treble"]) {
             trace.name = name.to_string();
         }
-        let connected = time_domain_buffer(48, 12, &current, &cfg, VisualStyle::Persistence)?;
+        let live = time_domain_buffer(48, 12, &current, &cfg, VisualStyle::Persistence)?;
 
         let mut with_empty_history = vec![
             persistence_trace(Vec::new(), Color::Cyan, Palette::Original),
@@ -1208,7 +1206,7 @@ mod tests {
         ];
         with_empty_history.extend(current.clone());
         assert_eq!(
-            connected,
+            live,
             time_domain_buffer(48, 12, &with_empty_history, &cfg, VisualStyle::Persistence,)?,
             "history effects changed newest waveform geometry"
         );
@@ -1217,15 +1215,13 @@ mod tests {
             persistence_trace(Vec::new(), Color::Cyan, Palette::Original),
             persistence_trace(Vec::new(), Color::Green, Palette::Original),
             persistence_trace(samples, Color::Blue, Palette::Original),
-            persistence_trace(Vec::new(), Color::Cyan, Palette::Original),
-            persistence_trace(Vec::new(), Color::Green, Palette::Original),
-            persistence_trace(Vec::new(), Color::Blue, Palette::Original),
         ];
-        for (trace, name) in history[3..].iter_mut().zip(["bass", "mid", "treble"]) {
-            trace.name = name.to_string();
-        }
-        let hairline = time_domain_buffer(48, 12, &history, &cfg, VisualStyle::Persistence)?;
-        assert!(braille_pixels(&hairline).len() < braille_pixels(&connected).len());
+        history.extend(current);
+        let hidden_history = time_domain_buffer(48, 12, &history, &cfg, VisualStyle::Persistence)?;
+        assert_eq!(
+            hidden_history, live,
+            "historical treble should not add any persistence pixels"
+        );
         Ok(())
     }
 
