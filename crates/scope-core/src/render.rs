@@ -693,8 +693,8 @@ fn persistence_trace_effect(
     PersistenceTraceEffect {
         // Older traces expand just enough to imply depth without overpowering
         // the current waveform.
-        time_zoom: 1.0 + 0.06 * trail,
-        amplitude_zoom: 1.0 + 0.03 * trail,
+        time_zoom: 1.0 + 0.10 * trail,
+        amplitude_zoom: 1.0 + 0.05 * trail,
         // Connected high-frequency trails fill vertical Braille cells quickly.
         // Keep the live treble line continuous, but leave its history hairline-thin.
         points_only: band_count == 3 && traces_after.is_multiple_of(band_count) && age > 0,
@@ -1146,8 +1146,8 @@ mod tests {
         let oldest_bass = persistence_trace_effect(0, 12, 3);
         let oldest_treble = persistence_trace_effect(2, 12, 3);
         let newest_treble = persistence_trace_effect(11, 12, 3);
-        assert_eq!(oldest_bass.time_zoom, 1.06);
-        assert_eq!(oldest_bass.amplitude_zoom, 1.03);
+        assert_eq!(oldest_bass.time_zoom, 1.10);
+        assert_eq!(oldest_bass.amplitude_zoom, 1.05);
         assert!(!oldest_bass.points_only);
         assert!(oldest_treble.points_only);
         assert_eq!(

@@ -56,6 +56,11 @@ const DEFAULT_PERSISTENCE_WINDOW: usize = 12;
 const MAX_PERSISTENCE_WINDOW: usize = 120;
 
 #[cfg(feature = "audio")]
+/// Roughly three frames at the default 32 ms render period: enough separation
+/// to reduce trail noise without making Persistence feel sluggish.
+const PERSISTENCE_CAPTURE_INTERVAL: std::time::Duration = std::time::Duration::from_millis(80);
+
+#[cfg(feature = "audio")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 enum Theme {
     /// original color defaults used by the initial 3-band visualizer build
@@ -166,6 +171,7 @@ struct AudioRenderer {
     wave_count: usize,
     persistence_window: usize,
     persistence_bands: usize,
+    persistence_last_capture: Option<std::time::Duration>,
     peak: f64,
     rms: f64,
     clip_pct: f64,
@@ -194,6 +200,7 @@ impl AudioRenderer {
             wave_count: 3,
             persistence_window: DEFAULT_PERSISTENCE_WINDOW,
             persistence_bands: 0,
+            persistence_last_capture: None,
             peak: 0.0,
             rms: 0.0,
             clip_pct: 0.0,
@@ -282,6 +289,7 @@ impl AudioRenderer {
         if self.last_view != self.view {
             series.clear();
             self.persistence_bands = 0;
+            self.persistence_last_capture = None;
             self.peak_levels.fill(0.0);
             self.peak_until.fill(elapsed);
             self.peak_updated = elapsed;
@@ -289,7 +297,7 @@ impl AudioRenderer {
         }
         let colors = self.theme.colors(elapsed);
         let palette = self.theme.palette();
-        // Persistence applies both band brightness and age after adding the current frame.
+        // Persistence applies both band brightness and age after updating the live frame.
         if self.view != View::Persistence {
             // Recolor all retained history using this frame's one global hue.
             for row in series.iter_mut() {
@@ -321,6 +329,7 @@ impl AudioRenderer {
         {
             series.clear();
             self.persistence_bands = 0;
+            self.persistence_last_capture = None;
             self.dsp.analyze(&[], self.wave_count, true);
             [self.bass, self.mid, self.treble] = self.dsp.levels;
             (self.peak, self.rms, self.clip_pct) = (0.0, 0.0, 0.0);
@@ -333,7 +342,7 @@ impl AudioRenderer {
             self.update_peaks(elapsed);
         }
         match self.view {
-            View::Persistence => self.process_persistence(series, colors, palette),
+            View::Persistence => self.process_persistence(series, colors, palette, elapsed),
             View::Wave | View::OceanMist => {
                 let names: &[&str] = match self.wave_count {
                     1 => &["wave"],
@@ -407,6 +416,7 @@ impl AudioRenderer {
         series: &mut Vec<Series>,
         colors: [Color; 3],
         palette: Palette,
+        elapsed: std::time::Duration,
     ) {
         let names: &[&str] = match self.wave_count {
             1 => &["wave"],
@@ -417,6 +427,7 @@ impl AudioRenderer {
         if self.persistence_bands != bands {
             series.clear();
             self.persistence_bands = bands;
+            self.persistence_last_capture = None;
         }
         let cap = self.persistence_window * bands;
         if series.len() > cap {
@@ -425,19 +436,41 @@ impl AudioRenderer {
             series.rotate_left(discarded);
             series.truncate(cap);
         }
-        if series.len() == cap {
-            series.rotate_left(bands);
+        let promote_current = if series.is_empty() {
+            self.persistence_last_capture = Some(elapsed);
+            false
         } else {
-            for _ in 0..bands {
-                series.push(Series {
-                    name: String::new(),
-                    color: colors[0],
-                    palette,
-                    samples: Vec::new(),
-                    xy_points: Vec::new(),
-                    peak_levels: Vec::new(),
-                    max_frequency: self.max_frequency,
-                });
+            match self.persistence_last_capture {
+                None => {
+                    self.persistence_last_capture = Some(elapsed);
+                    false
+                }
+                Some(last_capture) if elapsed < last_capture => {
+                    self.persistence_last_capture = Some(elapsed);
+                    false
+                }
+                Some(last_capture) if elapsed - last_capture >= PERSISTENCE_CAPTURE_INTERVAL => {
+                    self.persistence_last_capture = Some(elapsed);
+                    true
+                }
+                Some(_) => false,
+            }
+        };
+        if series.is_empty() || promote_current {
+            if series.len() == cap {
+                series.rotate_left(bands);
+            } else {
+                for _ in 0..bands {
+                    series.push(Series {
+                        name: String::new(),
+                        color: colors[0],
+                        palette,
+                        samples: Vec::new(),
+                        xy_points: Vec::new(),
+                        peak_levels: Vec::new(),
+                        max_frequency: self.max_frequency,
+                    });
+                }
             }
         }
         let newest = series.len() - bands;
@@ -769,7 +802,7 @@ fn smoke(theme: Theme, persistence_window: u16) -> anyhow::Result<()> {
         renderer.view = view;
         renderer.wave_count = wave_count;
         let ticks = if view == View::Persistence {
-            renderer.persistence_window + 2
+            renderer.persistence_window * 2 + 2
         } else {
             16
         };
@@ -805,15 +838,15 @@ fn smoke(theme: Theme, persistence_window: u16) -> anyhow::Result<()> {
                 &cfg,
                 &frame,
                 &mut series,
-                std::time::Duration::from_secs_f64(12.0 + tick as f64 * 0.05),
+                std::time::Duration::from_secs_f64(12.0 + tick as f64 * 0.04),
             );
             if view == View::Persistence {
-                let frames = (tick + 1).min(renderer.persistence_window);
+                let frames = (tick / 2 + 1).min(renderer.persistence_window);
                 anyhow::ensure!(
                     series.len() == frames * wave_count,
                     "persistence history length"
                 );
-                if frames > 1 {
+                if tick > 0 && tick.is_multiple_of(2) {
                     let prior = series.len() - 2 * wave_count;
                     for (band, expected) in series[prior..prior + wave_count]
                         .iter()
@@ -843,7 +876,7 @@ fn smoke(theme: Theme, persistence_window: u16) -> anyhow::Result<()> {
                         Color::Rgb(255, 255, 255),
                     ],
                     Theme::Rgb => theme.colors(std::time::Duration::from_secs_f64(
-                        12.0 + tick as f64 * 0.05,
+                        12.0 + tick as f64 * 0.04,
                     )),
                 };
                 for (index, band) in series.iter().enumerate() {
@@ -1014,6 +1047,10 @@ mod tests {
             .unwrap_or(0)
     }
 
+    fn at_ms(millis: u64) -> std::time::Duration {
+        std::time::Duration::from_millis(millis)
+    }
+
     #[test]
     fn persistence_evicts_chronologically_and_fades_oldest_to_newest() {
         let cfg = AppConfig {
@@ -1031,7 +1068,7 @@ mod tests {
                     &cfg,
                     &vec![vec![value; 8]],
                     &mut series,
-                    std::time::Duration::ZERO,
+                    at_ms((tick - 1) as u64 * 80),
                 );
                 let frames = tick.min(window);
                 assert_eq!(series.len(), frames);
@@ -1049,6 +1086,43 @@ mod tests {
                     assert_eq!(band.name, if index + 1 == frames { "wave" } else { "" });
                 }
             }
+        }
+    }
+
+    #[test]
+    fn persistence_updates_live_each_frame_and_promotes_on_cadence() {
+        let cfg = AppConfig {
+            width: 4,
+            ..Default::default()
+        };
+        let mut renderer = AudioRenderer::new(44_100, Theme::Original, View::Persistence, None);
+        renderer.wave_count = 1;
+        renderer.set_persistence_window(3);
+        let mut series = Vec::new();
+
+        for (millis, value, expected) in [
+            (0, 0.1, vec![0.1]),
+            (32, 0.2, vec![0.2]),
+            (79, 0.3, vec![0.3]),
+            (80, 0.4, vec![0.3, 0.4]),
+            (111, 0.5, vec![0.3, 0.5]),
+            (159, 0.6, vec![0.3, 0.6]),
+            (160, 0.7, vec![0.3, 0.6, 0.7]),
+            // Injected time moved backwards: update the live trace and restart
+            // the 80 ms interval without promoting it early.
+            (10, 0.8, vec![0.3, 0.6, 0.8]),
+            (89, 0.9, vec![0.3, 0.6, 0.9]),
+            (90, 1.0, vec![0.6, 0.9, 1.0]),
+        ] {
+            renderer.process_at(&cfg, &vec![vec![value; 4]], &mut series, at_ms(millis));
+            assert_eq!(
+                series
+                    .iter()
+                    .map(|band| band.samples[0])
+                    .collect::<Vec<_>>(),
+                expected,
+                "unexpected history at {millis} ms"
+            );
         }
     }
 
@@ -1078,10 +1152,15 @@ mod tests {
         let mut series = Vec::new();
         renderer.set_persistence_window(4);
         for tick in 1..=5 {
-            renderer.process(&cfg, &vec![vec![tick as f64 / 10.0; 4]], &mut series);
+            renderer.process_at(
+                &cfg,
+                &vec![vec![tick as f64 / 10.0; 4]],
+                &mut series,
+                at_ms((tick - 1) as u64 * 80),
+            );
         }
         renderer.set_persistence_window(2);
-        renderer.process(&cfg, &vec![vec![0.6; 4]], &mut series);
+        renderer.process_at(&cfg, &vec![vec![0.6; 4]], &mut series, at_ms(400));
         assert_eq!(
             series
                 .iter()
@@ -1090,8 +1169,8 @@ mod tests {
             [0.5, 0.6]
         );
         renderer.set_persistence_window(4);
-        for value in [0.7, 0.8] {
-            renderer.process(&cfg, &vec![vec![value; 4]], &mut series);
+        for (millis, value) in [(480, 0.7), (560, 0.8)] {
+            renderer.process_at(&cfg, &vec![vec![value; 4]], &mut series, at_ms(millis));
         }
         assert_eq!(
             series
@@ -1102,7 +1181,7 @@ mod tests {
         );
         // A viewport-width change must not discard raw samples in retained frames.
         cfg.width = 2;
-        renderer.process(&cfg, &vec![vec![0.9; 4]], &mut series);
+        renderer.process_at(&cfg, &vec![vec![0.9; 4]], &mut series, at_ms(640));
         assert_eq!(series[0].samples, [0.6; 4]);
         assert_eq!(series[3].samples, [0.9; 2]);
         for (key, expected) in [('{', 1), ('}', 120)] {
@@ -1129,21 +1208,18 @@ mod tests {
         let mut reference = AudioRenderer::new(44_100, Theme::Rgb, View::Wave, None);
         let mut series = Vec::new();
         let mut reference_series = Vec::new();
+        let mut elapsed = 0;
         for count in [1, 2, 3, 2, 1, 3] {
             renderer.wave_count = count;
             reference.wave_count = count;
             let mut prior = Vec::new();
-            for tick in 0..3 {
+            for (tick, offset) in [0, 32, 80].into_iter().enumerate() {
                 let frame = tone(220.0 + tick as f64 * 1000.0);
-                renderer.process_at(&cfg, &frame, &mut series, std::time::Duration::ZERO);
-                reference.process_at(
-                    &cfg,
-                    &frame,
-                    &mut reference_series,
-                    std::time::Duration::ZERO,
-                );
-                assert_eq!(series.len(), (tick + 1).min(2) * count);
-                if tick > 0 {
+                let now = at_ms(elapsed + offset);
+                renderer.process_at(&cfg, &frame, &mut series, now);
+                reference.process_at(&cfg, &frame, &mut reference_series, now);
+                assert_eq!(series.len(), if tick < 2 { count } else { 2 * count });
+                if tick == 2 {
                     for (band, samples) in series[..count].iter().zip(&prior) {
                         assert_eq!(&band.samples, samples);
                         assert!(band.name.is_empty());
@@ -1160,6 +1236,7 @@ mod tests {
                     .map(|band| band.samples.clone())
                     .collect::<Vec<_>>();
             }
+            elapsed += 160;
         }
     }
 
@@ -1175,11 +1252,11 @@ mod tests {
             renderer.set_persistence_window(3);
             let mut series = Vec::new();
             let silence = vec![vec![0.0; 512]];
-            renderer.process(&cfg, &tone(1000.0), &mut series);
+            renderer.process_at(&cfg, &tone(1000.0), &mut series, at_ms(0));
             assert!(series
                 .iter()
                 .any(|band| band.samples.iter().any(|&sample| sample != 0.0)));
-            renderer.process(&cfg, &silence, &mut series);
+            renderer.process_at(&cfg, &silence, &mut series, at_ms(80));
             assert_eq!(series.len(), 2 * count);
             assert!(series[..count]
                 .iter()
@@ -1187,32 +1264,36 @@ mod tests {
             assert!(series[count..]
                 .iter()
                 .all(|band| band.samples.iter().all(|&sample| sample == 0.0)));
-            for _ in 0..2 {
-                renderer.process(&cfg, &silence, &mut series);
+            for millis in [160, 240] {
+                renderer.process_at(&cfg, &silence, &mut series, at_ms(millis));
             }
             assert_eq!(series.len(), 3 * count);
             assert!(series.iter().all(|band| band.samples.len() == 512
                 && band.samples.iter().all(|&sample| sample == 0.0)));
-            for invalid in [
+            for (index, invalid) in [
                 Vec::new(),
                 vec![Vec::new()],
                 vec![vec![0.5; 512], vec![0.5; 511]],
                 vec![vec![f64::NAN; 512]],
-            ] {
-                renderer.process(&cfg, &tone(1000.0), &mut series);
-                renderer.process(&cfg, &invalid, &mut series);
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let elapsed = 320 + index as u64 * 160;
+                renderer.process_at(&cfg, &tone(1000.0), &mut series, at_ms(elapsed));
+                renderer.process_at(&cfg, &invalid, &mut series, at_ms(elapsed + 1));
                 assert!(series.is_empty(), "invalid downmix retained trails");
                 assert_eq!(
                     (renderer.peak, renderer.rms, renderer.clip_pct),
                     (0.0, 0.0, 0.0)
                 );
-                renderer.process_at(&cfg, &silence, &mut series, std::time::Duration::ZERO);
-                assert_eq!(series.len(), count);
-                for (index, band) in series.iter().enumerate() {
-                    assert_eq!(
-                        band.color,
-                        Theme::Rgb.colors(std::time::Duration::ZERO)[index]
-                    );
+                renderer.process_at(&cfg, &silence, &mut series, at_ms(0));
+                renderer.process_at(&cfg, &silence, &mut series, at_ms(79));
+                assert_eq!(series.len(), count, "invalid input did not reset cadence");
+                renderer.process_at(&cfg, &silence, &mut series, at_ms(80));
+                assert_eq!(series.len(), 2 * count);
+                for (band, expected) in series[count..].iter().zip(Theme::Rgb.colors(at_ms(80))) {
+                    assert_eq!(band.color, expected);
                 }
             }
         }
@@ -1227,27 +1308,24 @@ mod tests {
         let mut renderer = AudioRenderer::new(44_100, Theme::Rgb, View::Persistence, None);
         renderer.wave_count = 1;
         let mut series = Vec::new();
-        for value in [0.1, 0.2] {
-            renderer.process_at(
-                &cfg,
-                &vec![vec![value; 8]],
-                &mut series,
-                std::time::Duration::ZERO,
-            );
-        }
+        renderer.process_at(&cfg, &vec![vec![0.1; 8]], &mut series, at_ms(0));
+        renderer.process_at(&cfg, &vec![vec![0.2; 8]], &mut series, at_ms(80));
         assert_eq!(series.len(), 2);
-        for view in [View::Wave, View::Persistence] {
-            renderer.view = view;
-            renderer.process_at(
-                &cfg,
-                &vec![vec![0.3; 8]],
-                &mut series,
-                std::time::Duration::ZERO,
-            );
-            assert_eq!(series.len(), 1);
-            assert_eq!(series[0].samples, [0.3; 8]);
-            assert_eq!(series[0].color, Color::Rgb(255, 0, 0));
-        }
+
+        renderer.view = View::Wave;
+        renderer.process_at(&cfg, &vec![vec![0.3; 8]], &mut series, at_ms(160));
+        assert_eq!(series.len(), 1);
+
+        renderer.view = View::Persistence;
+        renderer.process_at(&cfg, &vec![vec![0.3; 8]], &mut series, at_ms(240));
+        renderer.process_at(&cfg, &vec![vec![0.4; 8]], &mut series, at_ms(319));
+        assert_eq!(series.len(), 1);
+        assert_eq!(series[0].samples, [0.4; 8]);
+        assert_eq!(series[0].color, Theme::Rgb.colors(at_ms(319))[0]);
+        renderer.process_at(&cfg, &vec![vec![0.5; 8]], &mut series, at_ms(320));
+        assert_eq!(series.len(), 2);
+        assert_eq!(series[0].samples, [0.4; 8]);
+        assert_eq!(series[1].samples, [0.5; 8]);
     }
 
     #[test]
@@ -1260,6 +1338,7 @@ mod tests {
         let mut series = Vec::new();
         renderer.process_at(&cfg, &tone(1000.0), &mut series, std::time::Duration::ZERO);
         let original: Vec<_> = series.iter().map(|band| band.samples.clone()).collect();
+        renderer.process_at(&cfg, &tone(2000.0), &mut series, at_ms(80));
         for (theme, millis, base) in [
             (
                 Theme::Mono,
