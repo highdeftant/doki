@@ -324,7 +324,7 @@ fn draw_ocean_guides(frame: &mut Frame, area: Rect, background: Color, lanes: us
         .bg(background)
         .add_modifier(ratatui::style::Modifier::DIM);
     for lane in 0..lanes {
-        let center = (lane as f64 + 0.5) / lanes as f64;
+        let center = ocean_lane_center(lane, lanes);
         let row = ((1.0 - center) * f64::from(area.height - 1)).round() as u16;
         for col in (0..area.width).step_by(4) {
             if let Some(cell) = frame.buffer_mut().cell_mut((area.x + col, area.y + row)) {
@@ -334,6 +334,13 @@ fn draw_ocean_guides(frame: &mut Frame, area: Rect, background: Color, lanes: us
             }
         }
     }
+}
+
+fn ocean_lane_center(lane: usize, lanes: usize) -> f64 {
+    let distributed = (lane as f64 + 0.5) / lanes.max(1) as f64;
+    // Pull each lane one quarter of the way toward the shared midpoint while
+    // retaining enough separation to identify overlapping bands.
+    0.5 + (distributed - 0.5) * 0.75
 }
 
 fn render_ocean_mist(
@@ -375,7 +382,7 @@ fn render_ocean_mist(
         .marker(Marker::Dot)
         .paint(|ctx| {
             for (lane, (trace, current, previous)) in lanes_data.iter().enumerate() {
-                let center = (lane as f64 + 0.5) / lanes as f64;
+                let center = ocean_lane_center(lane, lanes);
                 let amplitude = 0.16 / cfg.scale.max(0.05);
                 for (index, (x, sample)) in previous.iter().enumerate() {
                     if index % dot_stride == 0 || index + 1 == previous.len() {
@@ -1937,7 +1944,10 @@ mod tests {
     }
 
     #[test]
-    fn ocean_mist_renders_distinct_rgb_wave_lanes_across_its_viewport() -> io::Result<()> {
+    fn ocean_mist_renders_closer_rgb_wave_lanes_across_its_viewport() -> io::Result<()> {
+        assert_eq!(ocean_lane_center(0, 3), 0.25);
+        assert_eq!(ocean_lane_center(1, 3), 0.5);
+        assert_eq!(ocean_lane_center(2, 3), 0.75);
         let mut terminal = Terminal::new(TestBackend::new(96, 24))?;
         let cfg = crate::AppConfig {
             show_ui: false,

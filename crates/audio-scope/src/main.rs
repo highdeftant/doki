@@ -117,6 +117,25 @@ fn theme_background_idx(theme: Theme) -> usize {
 }
 
 #[cfg(feature = "audio")]
+fn persistence_color(color: Color, brightness: f64) -> Color {
+    if brightness >= 1.0 {
+        return color;
+    }
+    // Preserve the terminal's exact ANSI theme color for the live trace. Older
+    // traces need true color so their brightness can fade predictably.
+    let fade_base = match color {
+        Color::Cyan => Color::Rgb(0, 128, 128),
+        Color::Green => Color::Rgb(0, 128, 0),
+        Color::Blue => Color::Rgb(0, 0, 128),
+        Color::Gray => Color::Rgb(192, 192, 192),
+        Color::DarkGray => Color::Rgb(128, 128, 128),
+        Color::White => Color::Rgb(255, 255, 255),
+        color => color,
+    };
+    shade_color(fade_base, brightness)
+}
+
+#[cfg(feature = "audio")]
 #[derive(Parser)]
 #[command(name = "audio-scope")]
 struct Cli {
@@ -478,16 +497,6 @@ impl AudioRenderer {
             // The evicted sample storage becomes the next DSP output buffer.
             std::mem::swap(&mut band.samples, samples);
         }
-        // Named ANSI colors need fixed true-color equivalents to fade, too.
-        let colors = colors.map(|color| match color {
-            Color::Cyan => Color::Rgb(0, 128, 128),
-            Color::Green => Color::Rgb(0, 128, 0),
-            Color::Blue => Color::Rgb(0, 0, 128),
-            Color::Gray => Color::Rgb(192, 192, 192),
-            Color::DarkGray => Color::Rgb(128, 128, 128),
-            Color::White => Color::Rgb(255, 255, 255),
-            color => color,
-        });
         let frames = series.len() / bands;
         for (age, frame) in series.chunks_exact_mut(bands).enumerate() {
             let brightness = if frames == 1 {
@@ -496,7 +505,7 @@ impl AudioRenderer {
                 0.2 + 0.8 * age as f64 / (frames - 1) as f64
             };
             for (index, band) in frame.iter_mut().enumerate() {
-                band.color = shade_color(colors[index], brightness);
+                band.color = persistence_color(colors[index], brightness);
                 band.palette = palette;
                 let name = if age + 1 == frames { names[index] } else { "" };
                 if band.name != name {
@@ -883,10 +892,12 @@ fn smoke(theme: Theme, persistence_window: u16) -> anyhow::Result<()> {
                     } else {
                         0.2 + 0.8 * age as f64 / (frames - 1) as f64
                     };
-                    anyhow::ensure!(
-                        band.color == shade_color(base[index % wave_count], fade),
-                        "persistence age intensity"
-                    );
+                    let expected = if age + 1 == frames {
+                        theme.colors(elapsed)[index % wave_count]
+                    } else {
+                        shade_color(base[index % wave_count], fade)
+                    };
+                    anyhow::ensure!(band.color == expected, "persistence age intensity");
                     anyhow::ensure!(
                         band.name.is_empty() == (age + 1 != frames),
                         "persistence current legend"
@@ -1083,7 +1094,12 @@ mod tests {
                     } else {
                         0.2 + 0.8 * index as f64 / (frames - 1) as f64
                     };
-                    assert_eq!(band.color, shade_color(Color::Rgb(0, 128, 128), fade));
+                    let expected = if index + 1 == frames {
+                        Color::Cyan
+                    } else {
+                        shade_color(Color::Rgb(0, 128, 128), fade)
+                    };
+                    assert_eq!(band.color, expected);
                     assert_eq!(band.name, if index + 1 == frames { "wave" } else { "" });
                 }
             }
@@ -1432,7 +1448,12 @@ mod tests {
             let frames = series.len() / 3;
             for (index, band) in series.iter().enumerate() {
                 let fade = 0.2 + 0.8 * (index / 3) as f64 / (frames - 1) as f64;
-                assert_eq!(band.color, shade_color(base[index % 3], fade));
+                let expected = if index / 3 + 1 == frames {
+                    theme.colors(std::time::Duration::from_millis(millis))[index % 3]
+                } else {
+                    shade_color(base[index % 3], fade)
+                };
+                assert_eq!(band.color, expected);
                 assert_eq!(band.palette, theme.palette());
                 if theme == Theme::Rgb {
                     assert_hue(
